@@ -173,12 +173,29 @@ class ScrapePageTool(BaseTool):
                     inp_type = inp.get('type', 'text')
                     inp_name = inp.get('name', 'unnamed')
                     inp_id = inp.get('id', '')
-                    selector = f"#{inp_id}" if inp_id else f"input[name='{inp_name}']"
-                    form_info.append(f"  - {inp_type} input: {inp_name} (selector: {selector})")
+                    
+                    # Handle submit buttons specially
+                    if inp_type == 'submit':
+                        if inp_id:
+                            selector = f"#{inp_id}"
+                        else:
+                            selector = "input[type='submit']"
+                        form_info.append(f"  - {inp_type} input: {inp_name} (selector: {selector})")
+                    else:
+                        # Regular inputs
+                        if inp_id:
+                            selector = f"#{inp_id}"
+                        elif inp_name != 'unnamed':
+                            selector = f"input[name='{inp_name}']"
+                        else:
+                            selector = f"input[type='{inp_type}']"
+                        form_info.append(f"  - {inp_type} input: {inp_name} (selector: {selector})")
             
             print("Processing buttons...")
             button_info = []
-            for btn in buttons:
+            # Find all button-like elements more comprehensively
+            all_buttons = soup.find_all(['button']) + soup.find_all('input', type='submit')
+            for btn in all_buttons:
                 if btn.name == 'button':
                     btn_text = btn.get_text(strip=True)
                     btn_id = btn.get('id', '')
@@ -305,8 +322,8 @@ async def main():
             1. Use scrape_page with Action Input "scrape" to understand the page structure
             2. Identify login form fields (username/password inputs)
             3. Test SQL injection by:
-               - Using input_textbox with Action Input "input[name='username'],admin" to enter username
-               - Using input_textbox with Action Input "input[name='password'],' OR 1=1--" to enter malicious password  
+               - Using input_textbox with Action Input "#username,admin" to enter username
+               - Using input_textbox with Action Input "#password,' OR 1=1--" to enter malicious password  
                - Using click_button with Action Input "input[type='submit']" to submit the form
             4. Use scrape_page with Action Input "scrape" again to check if login was successful
             5. Look for signs of successful login (welcome messages, dashboard, etc.)
