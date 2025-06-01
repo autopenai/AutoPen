@@ -105,12 +105,6 @@ const ScanLog: React.FC<ScanLogProps> = ({ events, results, onResultHover, onEve
     return formattedDetails.length > 0 ? formattedDetails.join("\n") : null
   }
 
-  const mockCode = `<form action="/login" method="POST">
-  <input type="text" name="username" />
-  <input type="password" name="password" />
-  <button type="submit">Login</button>
-</form>`
-
   return (
     <div className="h-full flex flex-col">
       <Card className="h-full bg-transparent border-0 rounded-none flex-1">
@@ -231,12 +225,6 @@ const ScanLog: React.FC<ScanLogProps> = ({ events, results, onResultHover, onEve
                                   <div className="text-sm">
                                     <p className="font-medium mb-2">Full Description:</p>
                                     <p className="text-muted-foreground leading-relaxed">{result.description}</p>
-                                  </div>
-                                  <div className="bg-background/50 border border-border rounded-lg p-4">
-                                    <p className="text-xs font-medium mb-2">Related Code:</p>
-                                    <pre className="text-xs text-foreground overflow-auto">
-                                      <code>{mockCode}</code>
-                                    </pre>
                                   </div>
                                 </div>
                               </AccordionContent>
