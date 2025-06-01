@@ -26,6 +26,13 @@ class TestStatus(str, Enum):
     FAILED = "failed"
 
 
+class Vulnerability(BaseModel):
+    severity: str
+    type: str
+    title: str
+    description: str
+
+
 class EventType(str, Enum):
     LOAD = "load"
     CLICK = "click"
@@ -49,11 +56,6 @@ class InputEventDetails(BaseModel):
     test_value: str
 
 
-class VulnerabilityEventDetails(BaseModel):
-    severity: str
-    type: str
-
-
 class GenericEventDetails(BaseModel):
     message: Optional[str] = None
     data: Optional[Dict[str, Any]] = None
@@ -64,7 +66,7 @@ EventDetails = Union[
     LoadEventDetails,
     ClickEventDetails,
     InputEventDetails,
-    VulnerabilityEventDetails,
+    Vulnerability,
     GenericEventDetails,
 ]
 
@@ -79,22 +81,20 @@ class PentestStartResponse(BaseModel):
     url: str
 
 
-class PentestStatusResponse(BaseModel):
-    test_id: str
-    status: TestStatus
-    progress_percentage: int
-    current_phase: str
-    events: List[Dict[str, Any]]
-    vulnerabilities_found: int
-    results: Dict[str, Any]
-
-
 class PentestEvent(BaseModel):
     event_type: EventType
     timestamp: datetime
     message: str
     details: Optional[EventDetails] = None
 
+
+class PentestStatusResponse(BaseModel):
+    test_id: str
+    status: TestStatus
+    progress_percentage: int
+    current_phase: str
+    events: List[PentestEvent]
+    results: List[Vulnerability]
 
 class PentestData(BaseModel):
     test_id: str
@@ -103,8 +103,7 @@ class PentestData(BaseModel):
     started_at: datetime
     progress_percentage: int = 0
     current_phase: str = "Initializing"
-    vulnerabilities_found: int = 0
-    results: Dict[str, Any] = Field(default_factory=dict)
+    results: List[Vulnerability] = Field(default_factory=list)
     events: List[PentestEvent] = Field(default_factory=list)
 
     def add_event(
@@ -121,6 +120,22 @@ class PentestData(BaseModel):
             details=details,
         )
         self.events.append(event)
+
+    def add_vulnerability(
+        self,
+        severity: str,
+        vuln_type: str,
+        title: str,
+        description: str,
+    ):
+        """Add a vulnerability to the results"""
+        vulnerability = Vulnerability(
+            severity=severity,
+            type=vuln_type,
+            title=title,
+            description=description,
+        )
+        self.results.append(vulnerability)
 
 
 # Storage for active tests
@@ -186,12 +201,11 @@ async def get_test_status(test_id: str):
             }
             for event in test_data.events
         ],
-        vulnerabilities_found=test_data.vulnerabilities_found,
         results=test_data.results,
     )
 
 
-@app.get("/tests")
+@app.get("/tests", response_model=List[PentestStatusResponse])
 async def list_tests(status: Optional[TestStatus] = None):
     """
     List all tests, optionally filtered by status.
@@ -202,12 +216,22 @@ async def list_tests(status: Optional[TestStatus] = None):
         tests = [test for test in tests if test.status == status]
 
     return [
-        {
-            "test_id": test.test_id,
-            "url": test.url,
-            "status": test.status,
-            "progress_percentage": test.progress_percentage,
-        }
+        PentestStatusResponse(
+            test_id=test.test_id,
+            status=test.status,
+            progress_percentage=test.progress_percentage,
+            current_phase=test.current_phase,
+            events=[
+                {
+                    "event_type": event.event_type,
+                    "timestamp": event.timestamp.isoformat(),
+                    "message": event.message,
+                    "details": event.details,
+                }
+                for event in test.events
+            ],
+            results=test.results,
+        )
         for test in sorted(tests, key=lambda x: x.started_at, reverse=True)
     ]
 
@@ -316,7 +340,7 @@ async def run_pentest(test_id: str, url: str):
             test_data.add_event(EventType.INFO, f"Starting {phase_name}")
 
             # Simulate different types of events during web app testing
-            if phase_name == "Web App Testing":
+            if phase_name == "Web App Te1a0eed4a-359c-4882-824f-771625faa9desting":
                 await simulate_web_testing(test_data)
             else:
                 # Simulate other scanning activities
@@ -332,28 +356,17 @@ async def run_pentest(test_id: str, url: str):
         test_data.progress_percentage = 100
         test_data.current_phase = "Completed"
 
-        # Add simplified results
-        test_data.vulnerabilities_found = 3
-        test_data.results = {
-            "high_risk": 1,
-            "medium_risk": 2,
-            "findings": ["SQL injection", "XSS vulnerability", "Weak SSL config"],
-        }
-
         test_data.add_event(
             EventType.INFO,
             "Pentest completed",
-            GenericEventDetails(
-                data={"vulnerabilities_found": test_data.vulnerabilities_found}
-            ),
+            GenericEventDetails(data={"vulnerabilities_found": len(test_data.results)}),
         )
 
     except Exception as e:
         # Handle errors
         test_data.status = TestStatus.FAILED
         test_data.current_phase = "Failed"
-        test_data.vulnerabilities_found = 0
-        test_data.results = {"error": str(e)}
+        test_data.results = []
         test_data.add_event(
             EventType.ERROR,
             f"Pentest failed: {str(e)}",
@@ -406,17 +419,39 @@ async def simulate_web_testing(test_data: PentestData):
         )
         await asyncio.sleep(0.3)
 
-    # Simulate finding vulnerabilities
+    # Simulate finding vulnerabilities and add them to results
     test_data.add_event(
         EventType.VULNERABILITY,
-        "Potential SQL injection found",
-        VulnerabilityEventDetails(severity="HIGH", type="SQL injection"),
+        "Potential SQL injection found in login form",
+        Vulnerability(
+            severity="HIGH",
+            type="SQL Injection",
+            title="SQL Injection in Login Form",
+            description="The username parameter in the login form is vulnerable to SQL injection attacks",
+        ),
+    )
+    test_data.add_vulnerability(
+        severity="HIGH",
+        vuln_type="SQL Injection",
+        title="SQL Injection in Login Form",
+        description="The username parameter in the login form is vulnerable to SQL injection attacks",
     )
 
     test_data.add_event(
         EventType.VULNERABILITY,
-        "Cross-site scripting (XSS) vulnerability detected",
-        VulnerabilityEventDetails(severity="MEDIUM", type="XSS"),
+        "Cross-site scripting vulnerability detected in search",
+        Vulnerability(
+            severity="MEDIUM",
+            type="Cross-Site Scripting",
+            title="Reflected XSS in Search Function",
+            description="The search parameter reflects user input without proper sanitization",
+        ),
+    )
+    test_data.add_vulnerability(
+        severity="MEDIUM",
+        vuln_type="Cross-Site Scripting",
+        title="Reflected XSS in Search Function",
+        description="The search parameter reflects user input without proper sanitization",
     )
 
 
@@ -424,34 +459,44 @@ async def simulate_scanning_phase(test_data: PentestData, phase_name: str):
     """Simulate other scanning phases"""
 
     if phase_name == "Port Scanning":
-        ports = [80, 443, 22, 21, 3306, 5432]
-        for port in ports:
-            status = "open" if port in [80, 443] else "closed"
-            service = "http" if port == 80 else "https" if port == 443 else "unknown"
+        test_data.add_event(
+            EventType.INFO,
+            "Scanning common ports",
+            GenericEventDetails(message="Checking ports 80, 443, 22, 21, 3306, 5432"),
+        )
+        await asyncio.sleep(0.5)
 
-            test_data.add_event(
-                EventType.VULNERABILITY,
-                f"Port {port}: {status}",
-                VulnerabilityEventDetails(
-                    severity=("HIGH" if port in [80, 443] else "LOW"), type=service
-                ),
-            )
-            await asyncio.sleep(0.1)
+        test_data.add_event(
+            EventType.INFO,
+            "Port scan completed - found open ports: 80, 443",
+            GenericEventDetails(data={"open_ports": [80, 443]}),
+        )
 
     elif phase_name == "Vulnerability Scanning":
-        vulnerabilities = [
-            ("CVE-2021-44228", "Log4j Remote Code Execution", "CRITICAL"),
-            ("CVE-2021-34527", "Windows Print Spooler", "HIGH"),
-            ("SSL-001", "Weak SSL Configuration", "MEDIUM"),
-        ]
+        test_data.add_event(
+            EventType.INFO,
+            "Scanning for known vulnerabilities",
+            GenericEventDetails(message="Checking CVE database"),
+        )
+        await asyncio.sleep(0.5)
 
-        for cve, desc, severity in vulnerabilities:
-            test_data.add_event(
-                EventType.VULNERABILITY,
-                f"Checking {cve}: {desc}",
-                VulnerabilityEventDetails(severity=severity, type=cve),
-            )
-            await asyncio.sleep(0.4)
+        # Simulate checking for vulnerabilities (but not finding critical ones)
+        test_data.add_event(
+            EventType.VULNERABILITY,
+            "Weak SSL configuration detected",
+            Vulnerability(
+                severity="LOW",
+                type="SSL Configuration",
+                title="Weak SSL/TLS Configuration",
+                description="The server supports weak cipher suites and older TLS versions",
+            ),
+        )
+        test_data.add_vulnerability(
+            severity="LOW",
+            vuln_type="SSL Configuration",
+            title="Weak SSL/TLS Configuration",
+            description="The server supports weak cipher suites and older TLS versions",
+        )
 
     else:
         # Generic scanning events
@@ -459,6 +504,7 @@ async def simulate_scanning_phase(test_data: PentestData, phase_name: str):
         test_data.add_event(
             EventType.INFO,
             f"Completed {phase_name} scan",
+            GenericEventDetails(message=f"{phase_name} phase finished"),
         )
 
 
