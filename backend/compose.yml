@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  pentest-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./
+          target: /app/backend
+        - action: rebuild
+          path: ./requirements.txt
