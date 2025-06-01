@@ -641,7 +641,7 @@ class XssTestTool(BaseTool):
                     if payload_reflected and (
                         has_script_tags or len(unencoded_chars) > 0
                     ):
-                        severity = "HIGH" if has_script_tags else "MEDIUM"
+                        severity = "MEDIUM"
                         vulnerabilities_found.append(
                             {
                                 "payload": payload,
