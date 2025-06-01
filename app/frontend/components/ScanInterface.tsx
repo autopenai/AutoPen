@@ -81,101 +81,30 @@ const ScanInterface: React.FC<ScanInterfaceProps> = ({
     }
   }, []);
 
-  // Update the SSE event subscription to handle the exact API schema
-  const subscribeToEvents = useCallback((id: string) => {
-    return subscribeToTestEvents(
-      id,
-      (event) => {
-        console.log("Received SSE event:", event);
-        setEvents((prev) => [...prev, event]);
-
-        // Update test data when receiving events
-        setTest((prevTest) => {
-          if (!prevTest) return prevTest;
-
-          // Update progress based on phase
-          let progress = prevTest.progress_percentage;
-          let phase = prevTest.current_phase;
-
-          if (event.message === "Starting reconnaissance phase") {
-            progress = 20;
-            phase = "Reconnaissance";
-          } else if (
-            event.message === "Starting web application testing with AI agent"
-          ) {
-            progress = 40;
-            phase = "AI Testing";
-          } else if (event.message === "AI agent completed analysis") {
-            progress = 80;
-            phase = "Analysis Complete";
-          } else if (event.message === "Generating final report") {
-            progress = 90;
-            phase = "Generating Report";
-          } else if (event.message === "Pentest completed") {
-            progress = 100;
-            phase = "Completed";
-          }
-
-          return {
-            ...prevTest,
-            progress_percentage: progress,
-            current_phase: phase,
-            status:
-              event.message === "Pentest completed"
-                ? "completed"
-                : prevTest.status,
-            events: [...(prevTest.events || []), event],
-          };
-        });
-
-        // Handle vulnerability events according to API schema
-        if (event.event_type === "vulnerability" && event.details?.data) {
-          const vulnData = event.details.data;
-          // Check if the vulnerability data matches the results schema
-          if (
-            vulnData.severity &&
-            vulnData.type &&
-            vulnData.title &&
-            vulnData.description
-          ) {
-            const newResult: ApiResult = {
-              severity: vulnData.severity,
-              type: vulnData.type,
-              title: vulnData.title,
-              description: vulnData.description,
-            };
-            setResults((prev) => [...prev, newResult]);
-          }
-        }
-
-        // Update scanning status based on events
-        if (
-          event.event_type === "info" &&
-          (event.message.includes("completed") ||
-            event.message.includes("Pentest completed"))
-        ) {
-          setIsScanning(false);
-        }
-      },
-      (error) => {
-        console.error("SSE error:", error);
-        setError("Connection to server lost");
-      },
-      () => {
-        console.log("SSE connection established");
-        setError(null);
-      }
-    );
-  }, []);
-
-  // Initialize test data
+  // Replace SSE subscription with polling
   useEffect(() => {
-    if (currentTestId) {
-      fetchTestData(currentTestId);
-      const unsubscribe = subscribeToEvents(currentTestId);
-      return unsubscribe;
+    if (!currentTestId) return
+
+    // Initial fetch
+    fetchTestData(currentTestId)
+
+    // Set up polling interval
+    const pollInterval = setInterval(() => {
+      fetchTestData(currentTestId)
+    }, 2000) // Poll every 2 seconds
+
+    // Cleanup interval on unmount or when testId changes
+    return () => {
+      clearInterval(pollInterval)
     }
-  }, [currentTestId, fetchTestData, subscribeToEvents]);
+  }, [currentTestId, fetchTestData])
+
+  // Stop polling when scan is completed
+  useEffect(() => {
+    if (test?.status === "completed" || test?.status === "failed") {
+      setIsScanning(false)
+    }
+  }, [test?.status])
 
   const handleNewScan = async () => {
     if (!currentUrl.trim() || isScanning) return;
