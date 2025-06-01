@@ -196,29 +196,6 @@ const ScanInterface: React.FC<ScanInterfaceProps> = ({
 
             {/* Status Indicator */}
             <div className="flex flex-col items-end space-y-1 min-w-[200px]">
-              <div className="flex items-center space-x-2">
-                {error && (
-                  <div className="flex items-center space-x-1 text-red-400">
-                    <AlertCircle className="h-4 w-4" />
-                    <span className="text-sm">Error</span>
-                  </div>
-                )}
-                {isLoading && (
-                  <>
-                    <Activity className="h-4 w-4 text-blue-500 animate-pulse" />
-                    <span className="text-sm text-muted-foreground">Loading...</span>
-                  </>
-                )}
-                {!isLoading && isScanning && (
-                  <>
-                    <Activity className="h-4 w-4 text-blue-500 animate-pulse" />
-                    <span className="text-sm text-muted-foreground">
-                      {test?.current_phase || "Scanning..."}
-                      {test?.progress_percentage !== undefined && ` (${test.progress_percentage}%)`}
-                    </span>
-                  </>
-                )}
-              </div>
               {/* Progress Bar and Findings Summary */}
               {test && (
                 <div className="w-full mt-1">
