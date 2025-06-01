@@ -3,7 +3,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, HttpUrl, Field
 import asyncio
 import json
-from typing import Optional, Dict, Any, AsyncGenerator, List
+from typing import Optional, Dict, Any, AsyncGenerator, List, Union
 from datetime import datetime
 from enum import Enum
 import uuid
@@ -22,10 +22,43 @@ class EventType(str, Enum):
     LOAD = "load"
     CLICK = "click"
     INPUT = "input"
-    SCAN = "scan"
     VULNERABILITY = "vulnerability"
     ERROR = "error"
     INFO = "info"
+
+
+# Specific event detail classes
+class LoadEventDetails(BaseModel):
+    url: str
+
+
+class ClickEventDetails(BaseModel):
+    element: str
+
+
+class InputEventDetails(BaseModel):
+    field: str
+    test_value: str
+
+
+class VulnerabilityEventDetails(BaseModel):
+    severity: str
+    type: str
+
+
+class GenericEventDetails(BaseModel):
+    message: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
+
+
+# Union type for all possible event details
+EventDetails = Union[
+    LoadEventDetails,
+    ClickEventDetails,
+    InputEventDetails,
+    VulnerabilityEventDetails,
+    GenericEventDetails,
+]
 
 
 class PentestRequest(BaseModel):
@@ -43,7 +76,6 @@ class PentestStatusResponse(BaseModel):
     status: TestStatus
     progress_percentage: int
     current_phase: str
-    total_events: int
     events: List[Dict[str, Any]]
     vulnerabilities_found: int
     results: Dict[str, Any]
@@ -53,7 +85,7 @@ class PentestEvent(BaseModel):
     event_type: EventType
     timestamp: datetime
     message: str
-    details: Optional[Dict[str, Any]] = None
+    details: Optional[EventDetails] = None
 
 
 class PentestData(BaseModel):
@@ -71,7 +103,7 @@ class PentestData(BaseModel):
         self,
         event_type: EventType,
         message: str,
-        details: Optional[Dict[str, Any]] = None,
+        details: Optional[EventDetails] = None,
     ):
         """Add an event to this test"""
         event = PentestEvent(
@@ -137,7 +169,6 @@ async def get_test_status(test_id: str):
         status=test_data.status,
         progress_percentage=test_data.progress_percentage,
         current_phase=test_data.current_phase,
-        total_events=len(test_data.events),
         events=[
             {
                 "event_type": event.event_type,
@@ -257,7 +288,9 @@ async def run_pentest(test_id: str, url: str):
     try:
         # Update status to running
         test_data.status = TestStatus.RUNNING
-        test_data.add_event(EventType.INFO, "Pentest started", {"url": url})
+        test_data.add_event(
+            EventType.INFO, "Pentest started", GenericEventDetails(data={"url": url})
+        )
 
         # Simulate pentest phases with events
         phases = [
@@ -302,7 +335,9 @@ async def run_pentest(test_id: str, url: str):
         test_data.add_event(
             EventType.INFO,
             "Pentest completed",
-            {"vulnerabilities_found": test_data.vulnerabilities_found},
+            GenericEventDetails(
+                data={"vulnerabilities_found": test_data.vulnerabilities_found}
+            ),
         )
 
     except Exception as e:
@@ -311,7 +346,11 @@ async def run_pentest(test_id: str, url: str):
         test_data.current_phase = "Failed"
         test_data.vulnerabilities_found = 0
         test_data.results = {"error": str(e)}
-        test_data.add_event(EventType.ERROR, f"Pentest failed: {str(e)}")
+        test_data.add_event(
+            EventType.ERROR,
+            f"Pentest failed: {str(e)}",
+            GenericEventDetails(message=str(e)),
+        )
 
 
 async def simulate_web_testing(test_data: PentestData):
@@ -319,12 +358,18 @@ async def simulate_web_testing(test_data: PentestData):
 
     # Simulate loading the page
     test_data.add_event(
-        EventType.LOAD, f"Loading page: {test_data.url}", {"url": test_data.url}
+        EventType.LOAD,
+        f"Loading page: {test_data.url}",
+        LoadEventDetails(url=test_data.url),
     )
     await asyncio.sleep(0.5)
 
     # Simulate finding and testing forms
-    test_data.add_event(EventType.INFO, "Scanning for forms and input fields")
+    test_data.add_event(
+        EventType.INFO,
+        "Scanning for forms and input fields",
+        GenericEventDetails(message="Analyzing page structure"),
+    )
     await asyncio.sleep(0.3)
 
     # Simulate input field testing
@@ -339,12 +384,7 @@ async def simulate_web_testing(test_data: PentestData):
         test_data.add_event(
             EventType.INPUT,
             f"Testing input field: {field_name}",
-            {
-                "field": field_name,
-                "test_value": test_value[:20] + "..."
-                if len(test_value) > 20
-                else test_value,
-            },
+            InputEventDetails(field=field_name, test_value=test_value),
         )
         await asyncio.sleep(0.2)
 
@@ -352,7 +392,9 @@ async def simulate_web_testing(test_data: PentestData):
     test_clicks = ["Login", "Submit", "Search", "Contact", "Admin"]
     for button in test_clicks:
         test_data.add_event(
-            EventType.CLICK, f"Clicking element: {button}", {"element": button}
+            EventType.CLICK,
+            f"Clicking element: {button}",
+            ClickEventDetails(element=button),
         )
         await asyncio.sleep(0.3)
 
@@ -360,13 +402,13 @@ async def simulate_web_testing(test_data: PentestData):
     test_data.add_event(
         EventType.VULNERABILITY,
         "Potential SQL injection found",
-        {"severity": "HIGH", "location": "/login", "parameter": "username"},
+        VulnerabilityEventDetails(severity="HIGH", type="SQL injection"),
     )
 
     test_data.add_event(
         EventType.VULNERABILITY,
         "Cross-site scripting (XSS) vulnerability detected",
-        {"severity": "MEDIUM", "location": "/search", "parameter": "q"},
+        VulnerabilityEventDetails(severity="MEDIUM", type="XSS"),
     )
 
 
@@ -377,18 +419,14 @@ async def simulate_scanning_phase(test_data: PentestData, phase_name: str):
         ports = [80, 443, 22, 21, 3306, 5432]
         for port in ports:
             status = "open" if port in [80, 443] else "closed"
+            service = "http" if port == 80 else "https" if port == 443 else "unknown"
+
             test_data.add_event(
-                EventType.SCAN,
+                EventType.VULNERABILITY,
                 f"Port {port}: {status}",
-                {
-                    "port": port,
-                    "status": status,
-                    "service": "http"
-                    if port == 80
-                    else "https"
-                    if port == 443
-                    else "unknown",
-                },
+                VulnerabilityEventDetails(
+                    severity=("HIGH" if port in [80, 443] else "LOW"), type=service
+                ),
             )
             await asyncio.sleep(0.1)
 
@@ -403,7 +441,7 @@ async def simulate_scanning_phase(test_data: PentestData, phase_name: str):
             test_data.add_event(
                 EventType.VULNERABILITY,
                 f"Checking {cve}: {desc}",
-                {"cve": cve, "severity": severity, "status": "not_vulnerable"},
+                VulnerabilityEventDetails(severity=severity, type=cve),
             )
             await asyncio.sleep(0.4)
 
@@ -411,7 +449,8 @@ async def simulate_scanning_phase(test_data: PentestData, phase_name: str):
         # Generic scanning events
         await asyncio.sleep(1)
         test_data.add_event(
-            EventType.SCAN, f"Completed {phase_name} scan", {"phase": phase_name}
+            EventType.INFO,
+            f"Completed {phase_name} scan",
         )
 
 
