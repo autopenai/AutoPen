@@ -694,13 +694,13 @@ def create_vulnerability_agent() -> AgentExecutor:
         XssTestTool(),  # NEW XSS testing tool
     ]
 
-    # Use a custom prompt that handles tool inputs better and ensures JSON output
-    prompt = PromptTemplate.from_template("""You are a web security expert with access to browser automation tools.
+    # Use a much more explicit prompt that enforces the format better
+    prompt = PromptTemplate.from_template("""You are a web security expert with access to browser automation tools. You MUST follow the exact format below.
 
 Available tools:
 {tools}
 
-Use the following format:
+MANDATORY FORMAT - Follow this EXACTLY:
 
 Question: the input question you must answer
 Thought: you should always think about what to do
@@ -709,7 +709,20 @@ Action Input: the input to the action (always provide a string, never use None o
 Observation: the result of the action
 ... (this Thought/Action/Action Input/Observation can repeat N times)
 Thought: I now know the final answer
-Final Answer: ALWAYS provide your final answer as a JSON array of vulnerability objects. Each vulnerability object must have exactly these fields: "severity" (string: "HIGH", "MEDIUM", or "LOW"), "type" (string: vulnerability type like "SQL Injection" or "XSS"), "title" (string: brief title), "description" (string: detailed description). If no vulnerabilities are found, return an empty array []. Example format:
+Final Answer: [JSON array of vulnerabilities]
+
+CRITICAL RULES:
+1. Always include "Action:" on its own line after "Thought:"
+2. Always include "Action Input:" on its own line after "Action:"
+3. Never skip the Action or Action Input lines
+4. Action Input must always be a valid string, never None/null/empty
+5. For scrape_page: Action Input must be "scrape"
+6. For input_textbox: Action Input must be "selector,text"
+7. For click_button: Action Input must be "css_selector"
+8. For sql_injection_test: Action Input must be "username_selector,password_selector"
+9. For xss_test: Action Input must be "input_selector"
+
+Final Answer must be JSON array format:
 [
   {{
     "severity": "HIGH",
@@ -747,9 +760,10 @@ Thought:{agent_scratchpad}""")
         agent=agent,
         tools=tools,
         verbose=True,
-        max_iterations=20,
-        handle_parsing_errors=True,
+        max_iterations=25,
+        handle_parsing_errors="Check your output and make sure to follow the exact format: Thought: ... Action: ... Action Input: ...",
         return_intermediate_steps=True,
+        early_stopping_method="generate",  # This helps with parsing issues
     )
 
     return agent_executor
