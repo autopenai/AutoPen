@@ -364,10 +364,26 @@ class SqlInjectionTestTool(BaseTool):
                 await current_session.fill_input(username_selector, username)
                 await asyncio.sleep(0.3)
 
+                # Add event for username input
+                if event_callback:
+                    event_callback(
+                        EventType.INPUT,
+                        f"Entering username for SQL injection test",
+                        GenericEventDetails(message=f"Field: {username_selector}, Value: {username}"),
+                    )
+
                 # Clear and fill password with payload
                 await current_session.page.fill(password_selector, "")
                 await current_session.fill_input(password_selector, password_payload)
                 await asyncio.sleep(0.3)
+
+                # Add event for password payload input
+                if event_callback:
+                    event_callback(
+                        EventType.INPUT,
+                        f"Entering SQL injection payload in password field",
+                        GenericEventDetails(message=f"Field: {password_selector}, Payload: {password_payload}"),
+                    )
 
                 # Submit form (try different submit methods)
                 current_url = current_session.page.url
@@ -375,14 +391,35 @@ class SqlInjectionTestTool(BaseTool):
                 try:
                     # Try clicking submit button
                     await current_session.click("input[type='submit']")
+                    # Add event for submit button click
+                    if event_callback:
+                        event_callback(
+                            EventType.CLICK,
+                            f"Submitting form with SQL injection payload",
+                            GenericEventDetails(message="Element: input[type='submit']"),
+                        )
                 except:
                     try:
                         # Alternative: try button element
                         await current_session.click("button[type='submit']")
+                        # Add event for button click
+                        if event_callback:
+                            event_callback(
+                                EventType.CLICK,
+                                f"Submitting form with SQL injection payload",
+                                GenericEventDetails(message="Element: button[type='submit']"),
+                            )
                     except:
                         try:
                             # Last resort: press Enter on password field
                             await current_session.page.press(password_selector, "Enter")
+                            # Add event for Enter key press
+                            if event_callback:
+                                event_callback(
+                                    EventType.CLICK,
+                                    f"Submitting form using Enter key",
+                                    GenericEventDetails(message=f"Pressed Enter on: {password_selector}"),
+                                )
                         except:
                             return "Could not submit form - no submit button found"
 
