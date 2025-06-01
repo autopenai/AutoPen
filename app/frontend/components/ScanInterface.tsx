@@ -83,28 +83,28 @@ const ScanInterface: React.FC<ScanInterfaceProps> = ({
 
   // Replace SSE subscription with polling
   useEffect(() => {
-    if (!currentTestId) return
+    if (!currentTestId) return;
 
     // Initial fetch
-    fetchTestData(currentTestId)
+    fetchTestData(currentTestId);
 
     // Set up polling interval
     const pollInterval = setInterval(() => {
-      fetchTestData(currentTestId)
-    }, 2000) // Poll every 2 seconds
+      fetchTestData(currentTestId);
+    }, 2000); // Poll every 2 seconds
 
     // Cleanup interval on unmount or when testId changes
     return () => {
-      clearInterval(pollInterval)
-    }
-  }, [currentTestId, fetchTestData])
+      clearInterval(pollInterval);
+    };
+  }, [currentTestId, fetchTestData]);
 
   // Stop polling when scan is completed
   useEffect(() => {
     if (test?.status === "completed" || test?.status === "failed") {
-      setIsScanning(false)
+      setIsScanning(false);
     }
-  }, [test?.status])
+  }, [test?.status]);
 
   const handleNewScan = async () => {
     if (!currentUrl.trim() || isScanning) return;
