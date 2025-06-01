@@ -12,6 +12,9 @@ import uuid
 from routes.sql_injection import router as sql_injection_router
 from routes.bucket_checker import router as bucket_checker_router
 
+# Import the agent testing function
+from agent_with_playwright import run_vulnerability_test
+
 app = FastAPI(title="Pentest API", version="1.0.0")
 
 # Include the new routers
@@ -95,6 +98,7 @@ class PentestStatusResponse(BaseModel):
     current_phase: str
     events: List[PentestEvent]
     results: List[Vulnerability]
+
 
 class PentestData(BaseModel):
     test_id: str
@@ -313,7 +317,7 @@ async def stream_test_events(test_id: str):
 
 async def run_pentest(test_id: str, url: str):
     """
-    Placeholder for the actual pentest implementation.
+    Run actual penetration test using LangChain agent with Playwright.
     """
     test_data = active_tests[test_id]
 
@@ -324,32 +328,93 @@ async def run_pentest(test_id: str, url: str):
             EventType.INFO, "Pentest started", GenericEventDetails(data={"url": url})
         )
 
-        # Simulate pentest phases with events
-        phases = [
-            ("Reconnaissance", 15),
-            ("Port Scanning", 30),
-            ("Vulnerability Scanning", 50),
-            ("Web App Testing", 75),
-            ("Report Generation", 100),
-        ]
+        # Phase 1: Reconnaissance
+        test_data.current_phase = "Reconnaissance"
+        test_data.progress_percentage = 15
+        test_data.add_event(EventType.INFO, "Starting reconnaissance phase")
 
-        for phase_name, progress in phases:
-            test_data.current_phase = phase_name
-            test_data.progress_percentage = progress
+        # Phase 2: Web Application Testing with Real Agent
+        test_data.current_phase = "Web Application Testing"
+        test_data.progress_percentage = 50
+        test_data.add_event(
+            EventType.INFO, "Starting web application testing with AI agent"
+        )
 
-            test_data.add_event(EventType.INFO, f"Starting {phase_name}")
+        test_data.add_event(
+            EventType.LOAD,
+            f"Loading page: {url}",
+            LoadEventDetails(url=url),
+        )
 
-            # Simulate different types of events during web app testing
-            if phase_name == "Web App Testing":
-                await simulate_web_testing(test_data)
-            else:
-                # Simulate other scanning activities
-                await simulate_scanning_phase(test_data, phase_name)
+        # Run the actual vulnerability test
+        test_results = await run_vulnerability_test(url)
 
-            # Check if test was cancelled
-            if test_data.status == TestStatus.FAILED:
-                test_data.add_event(EventType.ERROR, "Test was cancelled")
-                return
+        if test_results["success"]:
+            agent_output = test_results["agent_output"]
+            test_data.add_event(
+                EventType.INFO,
+                "AI agent completed analysis",
+                GenericEventDetails(
+                    message=agent_output[:500] + "..."
+                    if len(agent_output) > 500
+                    else agent_output
+                ),
+            )
+
+            # Check for vulnerabilities
+            if test_results["vulnerabilities_detected"]:
+                test_data.add_event(
+                    EventType.VULNERABILITY,
+                    "Potential vulnerability detected by AI agent",
+                    Vulnerability(
+                        severity="HIGH",
+                        type="AI-Detected Vulnerability",
+                        title="Potential Security Vulnerability",
+                        description=f"AI agent detected potential security issues: {agent_output[:200]}...",
+                    ),
+                )
+                test_data.add_vulnerability(
+                    severity="HIGH",
+                    vuln_type="AI-Detected Vulnerability",
+                    title="Potential Security Vulnerability",
+                    description=f"AI agent analysis: {agent_output[:200]}...",
+                )
+
+            # Process intermediate steps for detailed events
+            for step in test_results["intermediate_steps"]:
+                action, observation = step
+                if hasattr(action, "tool") and hasattr(action, "tool_input"):
+                    if action.tool == "input_textbox":
+                        parts = action.tool_input.split(",", 1)
+                        if len(parts) == 2:
+                            field_name = parts[0].strip()
+                            test_value = parts[1].strip()
+                            test_data.add_event(
+                                EventType.INPUT,
+                                f"Testing input field: {field_name}",
+                                InputEventDetails(
+                                    field=field_name, test_value=test_value
+                                ),
+                            )
+                    elif action.tool == "click_button":
+                        test_data.add_event(
+                            EventType.CLICK,
+                            f"Clicking element: {action.tool_input}",
+                            ClickEventDetails(element=action.tool_input),
+                        )
+        else:
+            # Agent test failed
+            error_msg = test_results.get("error", "Unknown error")
+            test_data.add_event(
+                EventType.ERROR,
+                f"Agent testing failed: {error_msg}",
+                GenericEventDetails(message=error_msg),
+            )
+
+        # Phase 3: Report Generation
+        test_data.current_phase = "Report Generation"
+        test_data.progress_percentage = 100
+        test_data.add_event(EventType.INFO, "Generating final report")
 
         # Mark as completed
         test_data.status = TestStatus.COMPLETED
@@ -366,145 +431,10 @@ async def run_pentest(test_id: str, url: str):
         # Handle errors
         test_data.status = TestStatus.FAILED
         test_data.current_phase = "Failed"
-        test_data.results = []
         test_data.add_event(
             EventType.ERROR,
             f"Pentest failed: {str(e)}",
             GenericEventDetails(message=str(e)),
-        )
-
-
-async def simulate_web_testing(test_data: PentestData):
-    """Simulate web application testing with browser automation events"""
-
-    # Simulate loading the page
-    test_data.add_event(
-        EventType.LOAD,
-        f"Loading page: {test_data.url}",
-        LoadEventDetails(url=test_data.url),
-    )
-    await asyncio.sleep(0.5)
-
-    # Simulate finding and testing forms
-    test_data.add_event(
-        EventType.INFO,
-        "Scanning for forms and input fields",
-        GenericEventDetails(message="Analyzing page structure"),
-    )
-    await asyncio.sleep(0.3)
-
-    # Simulate input field testing
-    test_inputs = [
-        ("username", "admin"),
-        ("password", "' OR 1=1 --"),
-        ("search", "<script>alert('xss')</script>"),
-        ("email", "test@test.com"),
-    ]
-
-    for field_name, test_value in test_inputs:
-        test_data.add_event(
-            EventType.INPUT,
-            f"Testing input field: {field_name}",
-            InputEventDetails(field=field_name, test_value=test_value),
-        )
-        await asyncio.sleep(0.2)
-
-    # Simulate clicking buttons and links
-    test_clicks = ["Login", "Submit", "Search", "Contact", "Admin"]
-    for button in test_clicks:
-        test_data.add_event(
-            EventType.CLICK,
-            f"Clicking element: {button}",
-            ClickEventDetails(element=button),
-        )
-        await asyncio.sleep(0.3)
-
-    # Simulate finding vulnerabilities and add them to results
-    test_data.add_event(
-        EventType.VULNERABILITY,
-        "Potential SQL injection found in login form",
-        Vulnerability(
-            severity="HIGH",
-            type="SQL Injection",
-            title="SQL Injection in Login Form",
-            description="The username parameter in the login form is vulnerable to SQL injection attacks",
-        ),
-    )
-    test_data.add_vulnerability(
-        severity="HIGH",
-        vuln_type="SQL Injection",
-        title="SQL Injection in Login Form",
-        description="The username parameter in the login form is vulnerable to SQL injection attacks",
-    )
-
-    test_data.add_event(
-        EventType.VULNERABILITY,
-        "Cross-site scripting vulnerability detected in search",
-        Vulnerability(
-            severity="MEDIUM",
-            type="Cross-Site Scripting",
-            title="Reflected XSS in Search Function",
-            description="The search parameter reflects user input without proper sanitization",
-        ),
-    )
-    test_data.add_vulnerability(
-        severity="MEDIUM",
-        vuln_type="Cross-Site Scripting",
-        title="Reflected XSS in Search Function",
-        description="The search parameter reflects user input without proper sanitization",
-    )
-
-
-async def simulate_scanning_phase(test_data: PentestData, phase_name: str):
-    """Simulate other scanning phases"""
-
-    if phase_name == "Port Scanning":
-        test_data.add_event(
-            EventType.INFO,
-            "Scanning common ports",
-            GenericEventDetails(message="Checking ports 80, 443, 22, 21, 3306, 5432"),
-        )
-        await asyncio.sleep(0.5)
-
-        test_data.add_event(
-            EventType.INFO,
-            "Port scan completed - found open ports: 80, 443",
-            GenericEventDetails(data={"open_ports": [80, 443]}),
-        )
-
-    elif phase_name == "Vulnerability Scanning":
-        test_data.add_event(
-            EventType.INFO,
-            "Scanning for known vulnerabilities",
-            GenericEventDetails(message="Checking CVE database"),
-        )
-        await asyncio.sleep(0.5)
-
-        # Simulate checking for vulnerabilities (but not finding critical ones)
-        test_data.add_event(
-            EventType.VULNERABILITY,
-            "Weak SSL configuration detected",
-            Vulnerability(
-                severity="LOW",
-                type="SSL Configuration",
-                title="Weak SSL/TLS Configuration",
-                description="The server supports weak cipher suites and older TLS versions",
-            ),
-        )
-        test_data.add_vulnerability(
-            severity="LOW",
-            vuln_type="SSL Configuration",
-            title="Weak SSL/TLS Configuration",
-            description="The server supports weak cipher suites and older TLS versions",
-        )
-
-    else:
-        # Generic scanning events
-        await asyncio.sleep(1)
-        test_data.add_event(
-            EventType.INFO,
-            f"Completed {phase_name} scan",
-            GenericEventDetails(message=f"{phase_name} phase finished"),
         )
 
 

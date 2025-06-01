@@ -226,7 +226,7 @@ def create_vulnerability_agent() -> AgentExecutor:
     
     # Initialize OpenAI LLM
     llm = ChatOpenAI(
-        model="gpt-4",
+        model="gpt-4.1-mini",
         temperature=0,
         openai_api_key=os.getenv("OPENAI_API_KEY")
     )
@@ -282,29 +282,29 @@ Thought:{agent_scratchpad}""")
     return agent_executor
 
 
-async def main():
-    """Main function to run the vulnerability testing agent"""
+async def run_vulnerability_test(target_url: str) -> Dict[str, Any]:
+    """
+    Run vulnerability testing agent and return results.
+    This function can be called from other modules.
+    """
+    global current_session
     
-    # Get target URL from command line or use default
-    target_url = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8080/login"
-    
-    print(f"🎯 Target URL: {target_url}")
-    print("🚀 Starting vulnerability assessment...")
+    results = {
+        "success": False,
+        "agent_output": "",
+        "intermediate_steps": [],
+        "vulnerabilities_detected": False,
+        "error": None
+    }
     
     try:
-        # Initialize Playwright session using context manager (like your working test)
-        print("🌐 Initializing browser session...")
+        print(f"🌐 Testing {target_url}...")
         config = SessionConfig(headless=True, timeout=10000)
         
         async with WebSession(target_url, config) as session:
-            # Store session globally for tools to access
-            global current_session
             current_session = session
             
-            print("✅ Browser session started successfully")
-            
             # Create and run the agent
-            print("🤖 Creating LangChain agent...")
             agent = create_vulnerability_agent()
             
             # Initial prompt for the agent
@@ -337,18 +337,22 @@ async def main():
             # Run the agent asynchronously
             result = await agent.ainvoke({"input": initial_prompt})
             
-            print("\n" + "="*60)
-            print("🏁 FINAL ASSESSMENT RESULT:")
-            print("="*60)
-            print(result.get("output", "No output available"))
-            print("="*60)
-        
-        # Session automatically closed by context manager
-        print("🧹 Browser session closed")
-        
+            results["success"] = True
+            results["agent_output"] = result.get("output", "")
+            results["intermediate_steps"] = result.get("intermediate_steps", [])
+            
+            # Check for vulnerability indicators
+            agent_output = results["agent_output"].lower()
+            results["vulnerabilities_detected"] = any(indicator in agent_output for indicator in [
+                "sql injection", "vulnerability found", "successful injection", 
+                "bypass", "xss", "script injection"
+            ])
+            
     except Exception as e:
+        results["error"] = str(e)
         print(f"❌ Error during assessment: {str(e)}")
-        traceback.print_exc()
+    
+    return results
 
 
 if __name__ == "__main__":
@@ -359,4 +363,10 @@ if __name__ == "__main__":
         sys.exit(1)
     
     # Run the async main function
-    asyncio.run(main()) 
+    if len(sys.argv) < 2:
+        print("❌ Error: Target URL required")
+        print("Usage: python agent_with_playwright.py <target_url>")
+        sys.exit(1)
+        
+    target_url = sys.argv[1]
+    asyncio.run(run_vulnerability_test(target_url))
