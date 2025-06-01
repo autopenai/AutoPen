@@ -4,13 +4,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl, Field
 import asyncio
 import json
-from typing import Optional, Dict, Any, AsyncGenerator, List, Union
+from typing import Optional, Dict, AsyncGenerator, List
 from datetime import datetime
 from enum import Enum
 import uuid
 
 # Import the agent testing function
 from agent_with_playwright import run_vulnerability_test
+from events import EventType, LoadEventDetails, Vulnerability, GenericEventDetails, EventDetails
 
 app = FastAPI(title="Pentest API", version="1.0.0")
 
@@ -29,51 +30,6 @@ class TestStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
-
-
-class Vulnerability(BaseModel):
-    severity: str
-    type: str
-    title: str
-    description: str
-
-
-class EventType(str, Enum):
-    LOAD = "load"
-    CLICK = "click"
-    INPUT = "input"
-    VULNERABILITY = "vulnerability"
-    ERROR = "error"
-    INFO = "info"
-
-
-# Specific event detail classes
-class LoadEventDetails(BaseModel):
-    url: str
-
-
-class ClickEventDetails(BaseModel):
-    element: str
-
-
-class InputEventDetails(BaseModel):
-    field: str
-    test_value: str
-
-
-class GenericEventDetails(BaseModel):
-    message: Optional[str] = None
-    data: Optional[Dict[str, Any]] = None
-
-
-# Union type for all possible event details
-EventDetails = Union[
-    LoadEventDetails,
-    ClickEventDetails,
-    InputEventDetails,
-    Vulnerability,
-    GenericEventDetails,
-]
 
 
 class PentestRequest(BaseModel):
@@ -186,15 +142,7 @@ async def get_test_status(test_id: str):
         status=test_data.status,
         progress_percentage=test_data.progress_percentage,
         current_phase=test_data.current_phase,
-        events=[
-            {
-                "event_type": event.event_type,
-                "timestamp": event.timestamp.isoformat(),
-                "message": event.message,
-                "details": event.details,
-            }
-            for event in test_data.events
-        ],
+        events=test_data.events,
         results=test_data.results,
     )
 
@@ -215,15 +163,7 @@ async def list_tests(status: Optional[TestStatus] = None):
             status=test.status,
             progress_percentage=test.progress_percentage,
             current_phase=test.current_phase,
-            events=[
-                {
-                    "event_type": event.event_type,
-                    "timestamp": event.timestamp.isoformat(),
-                    "message": event.message,
-                    "details": event.details,
-                }
-                for event in test.events
-            ],
+            events=test.events,
             results=test.results,
         )
         for test in sorted(tests, key=lambda x: x.started_at, reverse=True)
@@ -280,9 +220,9 @@ async def stream_test_events(test_id: str):
                         "event": event.event_type,
                         "timestamp": event.timestamp.isoformat(),
                         "message": event.message,
-                        "details": event.details,
+                        "details": event.details.dict() if event.details else None,
                     }
-                    yield f"data: {json.dumps(event_data)}\n\n"
+                    yield f"data: {json.dumps(event_data, default=str)}\n\n"
 
                 last_event_index = len(current_events)
 
@@ -336,8 +276,8 @@ async def run_pentest(test_id: str, url: str):
             LoadEventDetails(url=url),
         )
 
-        # Run the actual vulnerability test
-        test_results = await run_vulnerability_test(url)
+        # Run the actual vulnerability test with event callback
+        test_results = await run_vulnerability_test(url, test_data.add_event)
 
         if test_results["success"]:
             agent_output = test_results["agent_output"]
@@ -355,123 +295,140 @@ async def run_pentest(test_id: str, url: str):
             vulnerabilities = []
             try:
                 import re
-                
+
                 # Extract JSON array from agent output
-                json_match = re.search(r'\[.*?\]', agent_output, re.DOTALL)
+                json_match = re.search(r"\[.*?\]", agent_output, re.DOTALL)
                 if json_match:
                     json_str = json_match.group(0)
                     parsed_vulnerabilities = json.loads(json_str)
-                    
+
                     # Validate and process each vulnerability
                     for vuln_data in parsed_vulnerabilities:
-                        if isinstance(vuln_data, dict) and all(key in vuln_data for key in ['severity', 'type', 'title', 'description']):
+                        if isinstance(vuln_data, dict) and all(
+                            key in vuln_data
+                            for key in ["severity", "type", "title", "description"]
+                        ):
                             # Validate severity levels
-                            severity = vuln_data['severity'].upper()
-                            if severity not in ['HIGH', 'MEDIUM', 'LOW']:
-                                severity = 'MEDIUM'  # Default fallback
-                            
-                            vulnerabilities.append({
-                                "severity": severity,
-                                "type": vuln_data['type'],
-                                "title": vuln_data['title'],
-                                "description": vuln_data['description']
-                            })
-                
+                            severity = vuln_data["severity"].upper()
+                            if severity not in ["HIGH", "MEDIUM", "LOW"]:
+                                severity = "MEDIUM"  # Default fallback
+
+                            vulnerabilities.append(
+                                {
+                                    "severity": severity,
+                                    "type": vuln_data["type"],
+                                    "title": vuln_data["title"],
+                                    "description": vuln_data["description"],
+                                }
+                            )
+
                 # Fallback: if no JSON found, try legacy detection
                 if not vulnerabilities:
                     agent_output_lower = agent_output.lower()
-                    
-                    if 'sql injection' in agent_output_lower and ('successful' in agent_output_lower or 'vulnerability' in agent_output_lower):
-                        vulnerabilities.append({
-                            "severity": "HIGH",
-                            "type": "SQL Injection",
-                            "title": "Authentication Bypass via SQL Injection",
-                            "description": "The login form is vulnerable to SQL injection attacks. The agent was able to bypass authentication using malicious SQL payloads."
-                        })
-                    
-                    if 'xss' in agent_output_lower or 'cross-site scripting' in agent_output_lower:
-                        vulnerabilities.append({
-                            "severity": "MEDIUM",
-                            "type": "XSS",
-                            "title": "Cross-Site Scripting Vulnerability",
-                            "description": "The application is vulnerable to XSS attacks. User input is not properly sanitized before being reflected in the page."
-                        })
-                
+
+                    if "sql injection" in agent_output_lower and (
+                        "successful" in agent_output_lower
+                        or "vulnerability" in agent_output_lower
+                    ):
+                        vulnerabilities.append(
+                            {
+                                "severity": "HIGH",
+                                "type": "SQL Injection",
+                                "title": "Authentication Bypass via SQL Injection",
+                                "description": "The login form is vulnerable to SQL injection attacks. The agent was able to bypass authentication using malicious SQL payloads.",
+                            }
+                        )
+
+                    if (
+                        "xss" in agent_output_lower
+                        or "cross-site scripting" in agent_output_lower
+                    ):
+                        vulnerabilities.append(
+                            {
+                                "severity": "MEDIUM",
+                                "type": "XSS",
+                                "title": "Cross-Site Scripting Vulnerability",
+                                "description": "The application is vulnerable to XSS attacks. User input is not properly sanitized before being reflected in the page.",
+                            }
+                        )
+
             except json.JSONDecodeError as e:
                 test_data.add_event(
                     EventType.ERROR,
                     f"Failed to parse agent JSON output: {str(e)}",
-                    GenericEventDetails(message=f"Agent output: {agent_output[:200]}...")
+                    GenericEventDetails(
+                        message=f"Agent output: {agent_output[:200]}..."
+                    ),
                 )
-                
+
                 # Emergency fallback - create generic vulnerability if indicators present
                 agent_output_lower = agent_output.lower()
-                if any(keyword in agent_output_lower for keyword in ['vulnerability', 'injection', 'xss', 'exploit', 'successful']):
-                    vulnerabilities.append({
-                        "severity": "MEDIUM",
-                        "type": "Security Vulnerability",
-                        "title": "Potential Security Issue Detected",
-                        "description": f"The security agent detected potential vulnerabilities: {agent_output[:200]}..."
-                    })
+                if any(
+                    keyword in agent_output_lower
+                    for keyword in [
+                        "vulnerability",
+                        "injection",
+                        "xss",
+                        "exploit",
+                        "successful",
+                    ]
+                ):
+                    vulnerabilities.append(
+                        {
+                            "severity": "MEDIUM",
+                            "type": "Security Vulnerability",
+                            "title": "Potential Security Issue Detected",
+                            "description": f"The security agent detected potential vulnerabilities: {agent_output[:200]}...",
+                        }
+                    )
 
-            # Process vulnerabilities and add to results
+            # Process vulnerabilities and add to results (only if not already added by agent)
             for vuln_data in vulnerabilities:
-                # Create Vulnerability object
-                vulnerability = Vulnerability(
-                    severity=vuln_data["severity"],
-                    type=vuln_data["type"],
-                    title=vuln_data["title"],
-                    description=vuln_data["description"],
-                )
+                # Check if this vulnerability was already added by the agent
+                existing_vulns = [
+                    v for v in test_data.results if v.title == vuln_data["title"]
+                ]
+                if not existing_vulns:
+                    # Create Vulnerability object
+                    vulnerability = Vulnerability(
+                        severity=vuln_data["severity"],
+                        type=vuln_data["type"],
+                        title=vuln_data["title"],
+                        description=vuln_data["description"],
+                    )
 
-                # Add to results
-                test_data.add_vulnerability(vulnerability)
+                    # Add to results
+                    test_data.add_vulnerability(vulnerability)
 
-                # Add event
-                test_data.add_event(
-                    EventType.VULNERABILITY,
-                    f"Vulnerability detected: {vuln_data['title']}",
-                    vulnerability,
-                )
+                    # Add event (only if not already added by agent)
+                    existing_events = [
+                        e
+                        for e in test_data.events
+                        if e.event_type == EventType.VULNERABILITY
+                        and vuln_data["title"] in e.message
+                    ]
+                    if not existing_events:
+                        test_data.add_event(
+                            EventType.VULNERABILITY,
+                            f"Vulnerability detected: {vuln_data['title']}",
+                            vulnerability,
+                        )
 
             # Report vulnerability count
-            if vulnerabilities:
+            if len(test_data.results) > 0:
                 test_data.add_event(
                     EventType.INFO,
-                    f"Total vulnerabilities found: {len(vulnerabilities)}",
+                    f"Total vulnerabilities found: {len(test_data.results)}",
                     GenericEventDetails(
-                        data={"vulnerability_count": len(vulnerabilities)}
+                        data={"vulnerability_count": len(test_data.results)}
                     ),
                 )
             else:
                 test_data.add_event(
                     EventType.INFO,
                     "No vulnerabilities detected",
-                    GenericEventDetails(data={"vulnerability_count": 0})
+                    GenericEventDetails(data={"vulnerability_count": 0}),
                 )
-
-            # Process intermediate steps for detailed events
-            for step in test_results["intermediate_steps"]:
-                action, observation = step
-                if hasattr(action, "tool") and hasattr(action, "tool_input"):
-                    if action.tool == "input_textbox":
-                        parts = action.tool_input.split(",", 1)
-                        if len(parts) == 2:
-                            field_name = parts[0].strip()
-                            test_value = parts[1].strip()
-                            test_data.add_event(
-                                EventType.INPUT,
-                                f"Testing input field: {field_name}",
-                                InputEventDetails(
-                                    field=field_name, test_value=test_value
-                                ),
-                            )
-                    elif action.tool == "click_button":
-                        test_data.add_event(
-                            EventType.CLICK,
-                            f"Clicking element: {action.tool_input}",
-                            ClickEventDetails(element=action.tool_input),
-                        )
 
             # Phase 3: Report Generation
             test_data.current_phase = "Report Generation"
@@ -486,7 +443,9 @@ async def run_pentest(test_id: str, url: str):
             test_data.add_event(
                 EventType.INFO,
                 "Pentest completed",
-                GenericEventDetails(data={"vulnerabilities_found": len(test_data.results)}),
+                GenericEventDetails(
+                    data={"vulnerabilities_found": len(test_data.results)}
+                ),
             )
 
         else:
