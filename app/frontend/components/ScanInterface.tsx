@@ -195,35 +195,29 @@ const ScanInterface: React.FC<ScanInterfaceProps> = ({
             </div>
 
             {/* Status Indicator */}
-            <div className="flex items-center space-x-2">
-              {error && (
-                <div className="flex items-center space-x-1 text-red-400">
-                  <AlertCircle className="h-4 w-4" />
-                  <span className="text-sm">Error</span>
+            <div className="flex flex-col items-end space-y-1 min-w-[200px]">
+              {/* Progress Bar and Findings Summary */}
+              {test && (
+                <div className="w-full mt-1">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-xs text-muted-foreground font-medium">
+                      {test.current_phase}
+                    </span>
+                    <span className="text-xs text-muted-foreground font-medium">
+                      {test.status === "completed"
+                        ? `${results.length} findings`
+                        : `${test.progress_percentage}%`}
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-800 rounded-full h-2.5">
+                    <div
+                      className={`h-2.5 rounded-full transition-all duration-300 ${
+                        test.status === "completed" ? "bg-green-500" : "bg-blue-500"
+                      }`}
+                      style={{ width: `${test.progress_percentage}%` }}
+                    />
+                  </div>
                 </div>
-              )}
-              {isLoading && (
-                <>
-                  <Activity className="h-4 w-4 text-blue-500 animate-pulse" />
-                  <span className="text-sm text-muted-foreground">
-                    Loading...
-                  </span>
-                </>
-              )}
-              {!isLoading && isScanning && (
-                <>
-                  <Activity className="h-4 w-4 text-blue-500 animate-pulse" />
-                  <span className="text-sm text-muted-foreground">
-                    {test?.current_phase || "Scanning..."}
-                    {test?.progress_percentage !== undefined &&
-                      ` (${test.progress_percentage}%)`}
-                  </span>
-                </>
-              )}
-              {!isLoading && !isScanning && results.length > 0 && (
-                <span className="text-sm text-muted-foreground">
-                  Scan completed - {results.length} findings
-                </span>
               )}
             </div>
           </div>
