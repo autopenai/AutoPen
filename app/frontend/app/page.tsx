@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { motion } from "framer-motion"
-import { Shield, Loader2, RefreshCw, AlertCircle } from "lucide-react"
+import { Loader2, RefreshCw, AlertCircle } from "lucide-react"
 import AddressBar from "@/components/AddressBar"
 import ScanHistoryComponent from "@/components/ScanHistory"
 import ScanInterface from "@/components/ScanInterface"

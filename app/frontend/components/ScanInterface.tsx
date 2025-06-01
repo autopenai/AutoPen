@@ -6,8 +6,7 @@ import { motion } from "framer-motion";
 import {
   ArrowLeft,
   Search,
-  Shield,
-  Activity,
+  Lock,
   ChevronLeft,
   ChevronRight,
   AlertCircle,
@@ -165,6 +164,14 @@ const ScanInterface: React.FC<ScanInterfaceProps> = ({
     return "";
   };
 
+  useEffect(() => {
+    // On mount, if there is an initialUrl, run handleNewScan
+    if (initialUrl) {
+      handleNewScan();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -242,7 +249,7 @@ const ScanInterface: React.FC<ScanInterfaceProps> = ({
           <div className="p-4 border-b border-border bg-card/30">
             <div className="flex items-center space-x-2">
               <div className="flex items-center bg-background border border-border rounded-full px-4 py-2 flex-1 min-h-[44px]">
-                <Shield className="h-4 w-4 text-muted-foreground mr-3" />
+                <Lock className="h-4 w-4 text-muted-foreground mr-3" />
                 <Input
                   type="text"
                   value={currentUrl}
