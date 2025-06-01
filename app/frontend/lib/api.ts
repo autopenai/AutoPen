@@ -1,126 +1,168 @@
-import type { Test, NewTestResponse, PentestEvent } from "@/types/pentest"
+import type { Test, NewTestResponse, PentestEvent } from "@/types/pentest";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://be38-12-94-170-82.ngrok-free.app"
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 
 // Helper function to make API requests with proper error handling and timeout
-async function makeApiRequest(url: string, options: RequestInit = {}): Promise<Response> {
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
+async function makeApiRequest(
+  url: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
   const defaultHeaders = {
     "Content-Type": "application/json",
     "ngrok-skip-browser-warning": "true",
     Accept: "application/json",
     ...options.headers,
-  }
+  };
 
   const requestOptions: RequestInit = {
     ...options,
     headers: defaultHeaders,
     mode: "cors",
     signal: controller.signal,
-  }
+  };
 
-  console.log(`Making API request to: ${url}`)
+  console.log(`Making API request to: ${url}`);
 
   try {
-    const response = await fetch(url, requestOptions)
-    clearTimeout(timeoutId)
-    console.log(`Response status: ${response.status} ${response.statusText}`)
-    return response
+    const response = await fetch(url, requestOptions);
+    clearTimeout(timeoutId);
+    console.log(`Response status: ${response.status} ${response.statusText}`);
+    return response;
   } catch (error) {
-    clearTimeout(timeoutId)
+    clearTimeout(timeoutId);
 
     if (error instanceof Error) {
       if (error.name === "AbortError") {
-        throw new Error("Request timeout - API server may be unavailable")
+        throw new Error("Request timeout - API server may be unavailable");
       }
       if (error.message.includes("Failed to fetch")) {
-        throw new Error("Network error - Cannot reach API server")
+        throw new Error("Network error - Cannot reach API server");
       }
-      throw new Error(`Network error: ${error.message}`)
+      throw new Error(`Network error: ${error.message}`);
     }
 
-    throw new Error("Unknown network error occurred")
+    throw new Error("Unknown network error occurred");
   }
 }
 
 export async function getAllTests(): Promise<Test[]> {
-  const response = await makeApiRequest(`${API_BASE_URL}/tests`)
+  const response = await makeApiRequest(`${API_BASE_URL}/tests`);
 
   if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText}`)
+    throw new Error(`API error: ${response.status} ${response.statusText}`);
   }
 
-  const data = await response.json()
-  console.log("Tests data received:", data)
-  return Array.isArray(data) ? data : []
+  const data = await response.json();
+  console.log("Tests data received:", data);
+  return Array.isArray(data) ? data : [];
 }
 
 export async function getTestById(testId: string): Promise<Test | null> {
-  const response = await makeApiRequest(`${API_BASE_URL}/tests/${testId}`)
+  const response = await makeApiRequest(`${API_BASE_URL}/tests/${testId}`);
 
   if (!response.ok) {
     if (response.status === 404) {
-      console.warn(`Test ${testId} not found`)
-      return null
+      console.warn(`Test ${testId} not found`);
+      return null;
     }
-    throw new Error(`API error: ${response.status} ${response.statusText}`)
+    throw new Error(`API error: ${response.status} ${response.statusText}`);
   }
 
-  const data = await response.json()
-  console.log("Test details received:", data)
-  return data
+  const data = await response.json();
+  console.log("Test details received:", data);
+  return data;
 }
 
-export async function startNewTest(url: string): Promise<NewTestResponse | null> {
+export async function startNewTest(
+  url: string
+): Promise<NewTestResponse | null> {
   const response = await makeApiRequest(`${API_BASE_URL}/tests`, {
     method: "POST",
     body: JSON.stringify({ url }),
-  })
+  });
 
   if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText}`)
+    throw new Error(`API error: ${response.status} ${response.statusText}`);
   }
 
-  const data = await response.json()
-  console.log("New test created:", data)
-  return data
+  const data = await response.json();
+  console.log("New test created:", data);
+  return data;
 }
 
 export function subscribeToTestEvents(
   testId: string,
   onEvent: (event: PentestEvent) => void,
   onError?: (error: Event) => void,
-  onOpen?: () => void,
+  onOpen?: () => void
 ): () => void {
-  console.log("Subscribing to SSE events for test:", testId)
+  console.log("Starting polling for test:", testId);
 
-  const eventSource = new EventSource(`${API_BASE_URL}/tests/${testId}/events`)
+  let isPolling = true;
+  let timeoutId: NodeJS.Timeout;
+  let lastEventCount = 0;
 
-  eventSource.onopen = () => {
-    console.log(`SSE connection opened for test ${testId}`)
-    onOpen?.()
-  }
+  // Call onOpen immediately to indicate connection started
+  onOpen?.();
 
-  eventSource.onmessage = (event) => {
+  const poll = async () => {
+    if (!isPolling) return;
+
     try {
-      console.log("SSE event received:", event.data)
-      const data = JSON.parse(event.data) as PentestEvent
-      onEvent(data)
-    } catch (error) {
-      console.error("Error parsing SSE event:", error)
-    }
-  }
+      console.log(`Polling test ${testId} for updates...`);
+      const testData = await getTestById(testId);
 
-  eventSource.onerror = (error) => {
-    console.error("SSE error:", error)
-    onError?.(error)
-  }
+      if (testData) {
+        // Emit any new events that we haven't seen before
+        if (testData.events && testData.events.length > lastEventCount) {
+          const newEvents = testData.events.slice(lastEventCount);
+          newEvents.forEach((event) => onEvent(event));
+          lastEventCount = testData.events.length;
+        }
+
+        // Stop polling if status is no longer pending or running
+        if (
+          testData.status &&
+          testData.status !== "pending" &&
+          testData.status !== "running"
+        ) {
+          console.log(
+            `Test ${testId} completed with status: ${testData.status}`
+          );
+          isPolling = false;
+          return;
+        }
+      }
+
+      // Schedule next poll in 5 seconds if still polling
+      if (isPolling) {
+        timeoutId = setTimeout(poll, 5000);
+      }
+    } catch (error) {
+      console.error("Polling error:", error);
+      // Create a mock error event for compatibility with SSE interface
+      const errorEvent = new Event("error");
+      onError?.(errorEvent);
+
+      // Continue polling even on error, schedule next poll in 5 seconds
+      if (isPolling) {
+        timeoutId = setTimeout(poll, 5000);
+      }
+    }
+  };
+
+  // Start the first poll immediately
+  poll();
 
   // Return cleanup function
   return () => {
-    console.log(`Closing SSE connection for test ${testId}`)
-    eventSource.close()
-  }
+    console.log(`Stopping polling for test ${testId}`);
+    isPolling = false;
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  };
 }
