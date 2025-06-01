@@ -45,11 +45,6 @@ class PentestStatusResponse(BaseModel):
     current_phase: str
     total_events: int
     events: List[Dict[str, Any]]
-
-
-class PentestResultsResponse(BaseModel):
-    test_id: str
-    status: TestStatus
     vulnerabilities_found: int
     results: Dict[str, Any]
 
@@ -127,16 +122,16 @@ async def start_pentest(request: PentestRequest):
     )
 
 
-@app.get("/tests/{test_id}/status", response_model=PentestStatusResponse)
+@app.get("/tests/{test_id}", response_model=PentestStatusResponse)
 async def get_test_status(test_id: str):
     """
-    Get the current status, progress, and event history of a pentest.
+    Get the current status, progress, results, and event history of a pentest.
     """
     if test_id not in active_tests:
         raise HTTPException(status_code=404, detail="Test not found")
-    
+
     test_data = active_tests[test_id]
-    
+
     return PentestStatusResponse(
         test_id=test_id,
         status=test_data.status,
@@ -148,32 +143,10 @@ async def get_test_status(test_id: str):
                 "event_type": event.event_type,
                 "timestamp": event.timestamp.isoformat(),
                 "message": event.message,
-                "details": event.details
+                "details": event.details,
             }
             for event in test_data.events
-        ]
-    )
-
-
-@app.get("/tests/{test_id}/results", response_model=PentestResultsResponse)
-async def get_test_results(test_id: str):
-    """
-    Get the results of a completed pentest.
-    """
-    if test_id not in active_tests:
-        raise HTTPException(status_code=404, detail="Test not found")
-
-    test_data = active_tests[test_id]
-
-    if test_data.status not in [TestStatus.COMPLETED, TestStatus.FAILED]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Test is still {test_data.status}. Results not available yet.",
-        )
-
-    return PentestResultsResponse(
-        test_id=test_id,
-        status=test_data.status,
+        ],
         vulnerabilities_found=test_data.vulnerabilities_found,
         results=test_data.results,
     )
