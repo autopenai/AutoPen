@@ -1,180 +1,198 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { motion } from "framer-motion"
-import { ArrowLeft, Search, Shield, Activity, ChevronLeft, ChevronRight } from "lucide-react"
+import { ArrowLeft, Search, Shield, Activity, ChevronLeft, ChevronRight, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import ScanLog from "./ScanLog"
-import type { SecurityFinding, LogEntry } from "@/types/pentest"
+import type { PentestEvent, TestResult, Test } from "@/types/pentest"
+import { startNewTest, getTestById, subscribeToTestEvents } from "@/lib/api"
 
 interface ScanInterfaceProps {
   initialUrl: string
+  testId?: string
   onBack: () => void
 }
 
-const ScanInterface: React.FC<ScanInterfaceProps> = ({ initialUrl, onBack }) => {
+interface ApiResult {
+  severity: string
+  type: string
+  title: string
+  description: string
+}
+
+const ScanInterface: React.FC<ScanInterfaceProps> = ({ initialUrl, testId, onBack }) => {
   const [currentUrl, setCurrentUrl] = useState(initialUrl)
   const [isLogOpen, setIsLogOpen] = useState(true)
-  const [findings, setFindings] = useState<SecurityFinding[]>([])
-  const [logs, setLogs] = useState<LogEntry[]>([])
+  const [test, setTest] = useState<Test | null>(null)
+  const [events, setEvents] = useState<PentestEvent[]>([])
+  const [results, setResults] = useState<TestResult[]>([])
   const [isScanning, setIsScanning] = useState(false)
-  const [hoveredFinding, setHoveredFinding] = useState<SecurityFinding | null>(null)
+  const [hoveredResult, setHoveredResult] = useState<TestResult | null>(null)
   const [scanningElements, setScanningElements] = useState<string[]>([])
-  const [scanStatus, setScanStatus] = useState<string>("")
-  const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null)
+  const [selectedEvent, setSelectedEvent] = useState<PentestEvent | null>(null)
+  const [currentTestId, setCurrentTestId] = useState<string | undefined>(testId)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const addLog = (type: LogEntry["type"], message: string, details?: string) => {
-    const newLog: LogEntry = {
-      id: Math.random().toString(36).substr(2, 9),
-      timestamp: new Date(),
-      type,
-      message,
-      details,
+  // Fetch test data
+  const fetchTestData = useCallback(async (id: string) => {
+    try {
+      setIsLoading(true)
+      setError(null)
+
+      const testData = await getTestById(id)
+
+      if (testData) {
+        setTest(testData)
+        setEvents(testData.events || [])
+        setResults(testData.results || [])
+        setIsScanning(
+          testData.status === "in_progress" || testData.status === "running" || testData.status === "active",
+        )
+      } else {
+        setError("Test not found")
+      }
+    } catch (error) {
+      console.error("Error fetching test data:", error)
+      setError(error instanceof Error ? error.message : "Failed to fetch test data")
+    } finally {
+      setIsLoading(false)
     }
-    setLogs((prev) => [...prev, newLog])
+  }, [])
+
+  // Update the SSE event subscription to handle the exact API schema
+  const subscribeToEvents = useCallback((id: string) => {
+    return subscribeToTestEvents(
+      id,
+      (event) => {
+        console.log("Received SSE event:", event)
+        setEvents((prev) => [...prev, event])
+
+        // Update test data when receiving events
+        setTest((prevTest) => {
+          if (!prevTest) return prevTest
+
+          // Update progress based on phase
+          let progress = prevTest.progress_percentage
+          let phase = prevTest.current_phase
+
+          if (event.message === "Starting reconnaissance phase") {
+            progress = 20
+            phase = "Reconnaissance"
+          } else if (event.message === "Starting web application testing with AI agent") {
+            progress = 40
+            phase = "AI Testing"
+          } else if (event.message === "AI agent completed analysis") {
+            progress = 80
+            phase = "Analysis Complete"
+          } else if (event.message === "Generating final report") {
+            progress = 90
+            phase = "Generating Report"
+          } else if (event.message === "Pentest completed") {
+            progress = 100
+            phase = "Completed"
+          }
+
+          return {
+            ...prevTest,
+            progress_percentage: progress,
+            current_phase: phase,
+            status: event.message === "Pentest completed" ? "completed" : prevTest.status,
+            events: [...(prevTest.events || []), event],
+          }
+        })
+
+        // Handle vulnerability events according to API schema
+        if (event.event_type === "vulnerability" && event.details?.data) {
+          const vulnData = event.details.data
+          // Check if the vulnerability data matches the results schema
+          if (vulnData.severity && vulnData.type && vulnData.title && vulnData.description) {
+            const newResult: ApiResult = {
+              severity: vulnData.severity,
+              type: vulnData.type,
+              title: vulnData.title,
+              description: vulnData.description,
+            }
+            setResults((prev) => [...prev, newResult])
+          }
+        }
+
+        // Update scanning status based on events
+        if (
+          event.event_type === "info" &&
+          (event.message.includes("completed") || event.message.includes("Pentest completed"))
+        ) {
+          setIsScanning(false)
+        }
+      },
+      (error) => {
+        console.error("SSE error:", error)
+        setError("Connection to server lost")
+      },
+      () => {
+        console.log("SSE connection established")
+        setError(null)
+      },
+    )
+  }, [])
+
+  // Initialize test data
+  useEffect(() => {
+    if (currentTestId) {
+      fetchTestData(currentTestId)
+      const unsubscribe = subscribeToEvents(currentTestId)
+      return unsubscribe
+    }
+  }, [currentTestId, fetchTestData, subscribeToEvents])
+
+  const handleNewScan = async () => {
+    if (!currentUrl.trim() || isScanning) return
+
+    setEvents([])
+    setResults([])
+    setIsScanning(true)
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const response = await startNewTest(currentUrl)
+
+      if (response && response.test_id) {
+        setCurrentTestId(response.test_id)
+        // The SSE subscription will be set up by the useEffect
+      } else {
+        setError("Failed to start scan - no test ID returned")
+        setIsScanning(false)
+      }
+    } catch (error) {
+      console.error("Error starting new test:", error)
+      setError(error instanceof Error ? error.message : "Failed to start scan")
+      setIsScanning(false)
+    } finally {
+      setIsLoading(false)
+    }
   }
 
-  const simulateElementScan = (element: string) => {
+  const handleElementScan = useCallback((element: string) => {
     setScanningElements((prev) => [...prev, element])
     setTimeout(() => {
       setScanningElements((prev) => prev.filter((e) => e !== element))
     }, 2000)
-  }
-
-  const simulateScan = async () => {
-    setIsScanning(true)
-    setFindings([])
-    setLogs([])
-    setScanningElements([])
-    setScanStatus("Initializing scan...")
-
-    addLog("info", `🎯 Target URL: ${currentUrl}`)
-    addLog("info", "🚀 Starting vulnerability assessment...")
-    addLog("info", "🌐 Initializing browser session...")
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-
-    addLog("success", "✅ Browser session started successfully")
-    addLog("info", "🤖 Creating LangChain agent...")
-    addLog("info", "🔍 Running vulnerability assessment...")
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-
-    setScanStatus("Analyzing page structure...")
-    addLog(
-      "info",
-      "I need to understand the structure of the webpage first. I will use the scrape_page tool to get the current page content.",
-    )
-    addLog("info", "Action: scrape_page")
-    simulateElementScan("ssl-config")
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-
-    addLog("info", "Scraping page with query: scrape")
-    addLog("info", "Getting text content...")
-    addLog("info", "Retrieved 1030 characters of text")
-    addLog("info", "Getting HTML content...")
-    addLog("info", "Retrieved 28929 characters of HTML")
-    addLog("info", "Found 1 forms, 2 inputs, 3 buttons")
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-
-    setScanStatus("Testing for SQL injection...")
-    addLog(
-      "info",
-      "The page has a login form with two input fields for username and password. Now, I will test for SQL injection vulnerability.",
-    )
-    addLog("info", "Action: input_textbox")
-    addLog("info", "Inputting text with query: #username,admin")
-    simulateElementScan("search-input")
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-
-    addLog("info", "Successfully typed 'admin' into element with selector '#username'")
-    addLog("info", "Now entering malicious password to test for SQL injection.")
-    addLog("info", "Action: input_textbox")
-    addLog("info", "Inputting text with query: #password,' OR 1=1--")
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-
-    const xssFinding: SecurityFinding = {
-      id: "2",
-      title: "Potential XSS Vulnerability",
-      severity: "high",
-      description: "User input is not properly sanitized in search functionality.",
-      location: "/search?q=",
-      timestamp: new Date(),
-      element: "search-input",
-    }
-    setFindings((prev) => [...prev, xssFinding])
-    addLog("error", "🚨 XSS vulnerability detected in search functionality")
-
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    setScanStatus("Checking form security...")
-    addLog("info", "Action: click_button")
-    addLog("info", "Clicking button with query: button:has-text('Login')")
-    addLog("info", "Successfully clicked element with selector 'button:has-text('Login')'")
-    simulateElementScan("contact-form")
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-
-    const csrfFinding: SecurityFinding = {
-      id: "3",
-      title: "Missing CSRF Protection",
-      severity: "medium",
-      description: "Forms do not include CSRF tokens for protection against cross-site request forgery.",
-      location: "/contact-form",
-      timestamp: new Date(),
-      element: "contact-form",
-    }
-    setFindings((prev) => [...prev, csrfFinding])
-    addLog("warning", "⚠️ Missing CSRF protection detected")
-
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    setScanStatus("Analyzing security headers...")
-    addLog("info", "The form has been submitted. Now checking for signs of successful login.")
-    addLog("info", "Action: scrape_page")
-    addLog("info", "Scraping page with query: scrape")
-    simulateElementScan("headers")
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-
-    addLog("info", "Login Failed. Invalid credentials. Try admin/admin for demo access.")
-    addLog("info", "The login was not successful, indicating the SQL injection attempt was not successful.")
-
-    const headerFinding: SecurityFinding = {
-      id: "4",
-      title: "Missing Security Headers",
-      severity: "low",
-      description: "Important security headers like Content-Security-Policy are missing.",
-      location: "HTTP Headers",
-      timestamp: new Date(),
-      element: "headers",
-    }
-    setFindings((prev) => [...prev, headerFinding])
-    addLog("info", "📋 Security headers analysis complete")
-
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    setScanStatus("Finalizing assessment...")
-    addLog("info", "============================================================")
-    addLog("success", "🏁 FINAL ASSESSMENT RESULT:")
-    addLog("info", "============================================================")
-    addLog("info", `The login page at ${currentUrl} shows mixed security posture with ${3} vulnerabilities identified.`)
-    addLog("info", "============================================================")
-    addLog("success", "🧹 Browser session closed")
-
-    setScanStatus("Scan completed")
-    setIsScanning(false)
-  }
-
-  useEffect(() => {
-    simulateScan()
   }, [])
 
-  const handleNewScan = () => {
-    if (currentUrl.trim()) {
-      simulateScan()
+  useEffect(() => {
+    if (hoveredResult?.element) {
+      handleElementScan(hoveredResult.element)
     }
-  }
+  }, [hoveredResult, handleElementScan])
 
   const getHighlightColor = (element: string) => {
     if (scanningElements.includes(element)) return "border-blue-500 bg-blue-500/20"
-    if (hoveredFinding?.element === element) {
-      switch (hoveredFinding.severity) {
+    if (hoveredResult?.element === element) {
+      switch (hoveredResult.severity.toLowerCase()) {
         case "high":
           return "border-red-500 bg-red-500/20"
         case "medium":
@@ -201,23 +219,53 @@ const ScanInterface: React.FC<ScanInterfaceProps> = ({ initialUrl, onBack }) => 
               </Button>
               <div className="h-6 w-px bg-border" />
               <h1 className="text-lg font-semibold">Security Scan</h1>
+              {currentTestId && (
+                <span className="text-xs bg-blue-500/10 text-blue-400 px-2 py-1 rounded">Test ID: {currentTestId}</span>
+              )}
             </div>
 
             {/* Status Indicator */}
             <div className="flex items-center space-x-2">
-              {isScanning && (
+              {error && (
+                <div className="flex items-center space-x-1 text-red-400">
+                  <AlertCircle className="h-4 w-4" />
+                  <span className="text-sm">Error</span>
+                </div>
+              )}
+              {isLoading && (
                 <>
                   <Activity className="h-4 w-4 text-blue-500 animate-pulse" />
-                  <span className="text-sm text-muted-foreground">{scanStatus}</span>
+                  <span className="text-sm text-muted-foreground">Loading...</span>
                 </>
               )}
-              {!isScanning && findings.length > 0 && (
-                <span className="text-sm text-muted-foreground">Scan completed - {findings.length} findings</span>
+              {!isLoading && isScanning && (
+                <>
+                  <Activity className="h-4 w-4 text-blue-500 animate-pulse" />
+                  <span className="text-sm text-muted-foreground">
+                    {test?.current_phase || "Scanning..."}
+                    {test?.progress_percentage !== undefined && ` (${test.progress_percentage}%)`}
+                  </span>
+                </>
+              )}
+              {!isLoading && !isScanning && results.length > 0 && (
+                <span className="text-sm text-muted-foreground">Scan completed - {results.length} findings</span>
               )}
             </div>
           </div>
         </div>
       </div>
+
+      {/* Error Banner */}
+      {error && (
+        <div className="bg-red-500/10 border-b border-red-500/20 px-4 py-2">
+          <div className="max-w-7xl mx-auto">
+            <div className="flex items-center space-x-2">
+              <AlertCircle className="h-4 w-4 text-red-500" />
+              <span className="text-sm text-red-500">{error}</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex h-[calc(100vh-73px)] relative">
         {/* Main Content - Website iframe */}
@@ -233,7 +281,12 @@ const ScanInterface: React.FC<ScanInterfaceProps> = ({ initialUrl, onBack }) => 
                   className="border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-sm flex-1"
                   placeholder="Enter website URL"
                 />
-                <Button size="sm" onClick={handleNewScan} disabled={isScanning} className="ml-2 rounded-full">
+                <Button
+                  size="sm"
+                  onClick={handleNewScan}
+                  disabled={isScanning || isLoading}
+                  className="ml-2 rounded-full"
+                >
                   <Search className="h-3 w-3 mr-1" />
                   Scan
                 </Button>
@@ -251,31 +304,24 @@ const ScanInterface: React.FC<ScanInterfaceProps> = ({ initialUrl, onBack }) => 
 
             {/* Scanning overlays */}
             <div className="absolute inset-4 pointer-events-none">
-              {/* SSL Config overlay */}
               <motion.div
                 className={`absolute top-0 left-0 w-full h-16 border-2 rounded ${getHighlightColor("ssl-config")}`}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: getHighlightColor("ssl-config") ? 1 : 0 }}
                 transition={{ duration: 0.3 }}
               />
-
-              {/* Search input overlay */}
               <motion.div
                 className={`absolute top-1/3 left-1/4 w-1/2 h-12 border-2 rounded ${getHighlightColor("search-input")}`}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: getHighlightColor("search-input") ? 1 : 0 }}
                 transition={{ duration: 0.3 }}
               />
-
-              {/* Contact form overlay */}
               <motion.div
                 className={`absolute bottom-1/4 right-1/4 w-1/3 h-32 border-2 rounded ${getHighlightColor("contact-form")}`}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: getHighlightColor("contact-form") ? 1 : 0 }}
                 transition={{ duration: 0.3 }}
               />
-
-              {/* Headers overlay */}
               <motion.div
                 className={`absolute top-0 right-0 w-1/4 h-8 border-2 rounded ${getHighlightColor("headers")}`}
                 initial={{ opacity: 0 }}
@@ -303,7 +349,7 @@ const ScanInterface: React.FC<ScanInterfaceProps> = ({ initialUrl, onBack }) => 
           </Button>
         </motion.div>
 
-        {/* Analysis Panel - Slide in/out */}
+        {/* Analysis Panel */}
         <motion.div
           className="w-96 border-l border-border bg-card/50 overflow-hidden"
           initial={{ width: isLogOpen ? "384px" : "0px" }}
@@ -312,11 +358,11 @@ const ScanInterface: React.FC<ScanInterfaceProps> = ({ initialUrl, onBack }) => 
         >
           {isLogOpen && (
             <ScanLog
-              logs={logs}
-              findings={findings}
-              onFindingHover={setHoveredFinding}
-              onLogClick={setSelectedLog}
-              selectedLog={selectedLog}
+              events={events}
+              results={results}
+              onResultHover={setHoveredResult}
+              onEventClick={setSelectedEvent}
+              selectedEvent={selectedEvent}
             />
           )}
         </motion.div>

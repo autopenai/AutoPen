@@ -39,12 +39,12 @@ const ScanHistoryComponent: React.FC<ScanHistoryProps> = ({ history, onSelectSca
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center space-x-2 mb-6">
+      <div className="flex items-center space-x-2 mb-4">
         <Clock className="h-5 w-5 text-muted-foreground" />
-        <h2 className="text-xl font-semibold">Scan History</h2>
+        <h2 className="text-xl font-semibold">Recent Scans</h2>
       </div>
 
-      <div className="grid gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {history.map((scan, index) => {
           const totalFindings = getTotalFindings(scan.findings)
           const severity = getHighestSeverity(scan.findings)
@@ -59,13 +59,13 @@ const ScanHistoryComponent: React.FC<ScanHistoryProps> = ({ history, onSelectSca
               className="cursor-pointer"
               onClick={() => onSelectScan?.(scan)}
             >
-              <Card className="bg-card/50 border-border hover:bg-card/80 transition-colors">
-                <CardHeader className="pb-3">
+              <Card className="bg-card/50 border-border hover:bg-card/80 transition-colors h-full">
+                <CardHeader className="pb-2">
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
-                      <CardTitle className="text-base font-medium">{scan.url}</CardTitle>
-                      <CardDescription className="text-muted-foreground">
-                        {scan.timestamp.toLocaleDateString()} at {scan.timestamp.toLocaleTimeString()}
+                      <CardTitle className="text-sm font-medium truncate">{scan.url}</CardTitle>
+                      <CardDescription className="text-xs text-muted-foreground">
+                        {scan.timestamp.toLocaleDateString()}
                       </CardDescription>
                     </div>
                     <div className="flex items-center space-x-2">
@@ -76,24 +76,24 @@ const ScanHistoryComponent: React.FC<ScanHistoryProps> = ({ history, onSelectSca
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent className="pt-0">
-                  <div className="flex items-center space-x-4 text-sm">
+                <CardContent className="pt-0 pb-3">
+                  <div className="flex items-center space-x-2 text-xs">
                     {scan.findings.high > 0 && (
                       <div className="flex items-center space-x-1">
                         <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
-                        <span className="text-orange-400">{scan.findings.high} High</span>
+                        <span className="text-orange-400">{scan.findings.high}</span>
                       </div>
                     )}
                     {scan.findings.medium > 0 && (
                       <div className="flex items-center space-x-1">
                         <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
-                        <span className="text-yellow-400">{scan.findings.medium} Medium</span>
+                        <span className="text-yellow-400">{scan.findings.medium}</span>
                       </div>
                     )}
                     {scan.findings.low > 0 && (
                       <div className="flex items-center space-x-1">
                         <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                        <span className="text-blue-400">{scan.findings.low} Low</span>
+                        <span className="text-blue-400">{scan.findings.low}</span>
                       </div>
                     )}
                   </div>
@@ -104,7 +104,7 @@ const ScanHistoryComponent: React.FC<ScanHistoryProps> = ({ history, onSelectSca
         })}
 
         {history.length === 0 && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-12">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-8 col-span-3">
             <Shield className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
             <p className="text-muted-foreground">No scans performed yet</p>
             <p className="text-sm text-muted-foreground">Start your first security scan above</p>
