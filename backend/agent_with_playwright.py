@@ -506,7 +506,7 @@ def create_vulnerability_agent() -> AgentExecutor:
         XssTestTool()  # NEW XSS testing tool
     ]
     
-    # Use a custom prompt that handles tool inputs better
+    # Use a custom prompt that handles tool inputs better and ensures JSON output
     prompt = PromptTemplate.from_template("""You are a web security expert with access to browser automation tools.
 
 Available tools:
@@ -521,7 +521,21 @@ Action Input: the input to the action (always provide a string, never use None o
 Observation: the result of the action
 ... (this Thought/Action/Action Input/Observation can repeat N times)
 Thought: I now know the final answer
-Final Answer: the final answer to the original input question
+Final Answer: ALWAYS provide your final answer as a JSON array of vulnerability objects. Each vulnerability object must have exactly these fields: "severity" (string: "HIGH", "MEDIUM", or "LOW"), "type" (string: vulnerability type like "SQL Injection" or "XSS"), "title" (string: brief title), "description" (string: detailed description). If no vulnerabilities are found, return an empty array []. Example format:
+[
+  {{
+    "severity": "HIGH",
+    "type": "SQL Injection",
+    "title": "Authentication Bypass via SQL Injection",
+    "description": "The login form is vulnerable to SQL injection attacks. Using the payload ' OR 1=1-- in the password field successfully bypassed authentication."
+  }},
+  {{
+    "severity": "MEDIUM",
+    "type": "XSS",
+    "title": "Reflected Cross-Site Scripting",
+    "description": "The search input field reflects user input without proper encoding, allowing script execution."
+  }}
+]
 
 IMPORTANT: 
 - For scrape_page tool, always use "scrape" as Action Input
@@ -530,6 +544,7 @@ IMPORTANT:
 - For sql_injection_test tool, use format "username_selector,password_selector" as Action Input
 - For xss_test tool, use the CSS selector of the input field as Action Input
 - Never use None, null, or empty values as Action Input
+- Your Final Answer MUST be valid JSON array format, nothing else
 
 Begin!
 

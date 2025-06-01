@@ -351,20 +351,104 @@ async def run_pentest(test_id: str, url: str):
                 ),
             )
 
-            # Check for vulnerabilities
-            if test_results["vulnerabilities_detected"]:
-                vulnerability = Vulnerability(
-                    severity="HIGH",
-                    type="AI-Detected Vulnerability",
-                    title="Potential Security Vulnerability",
-                    description=f"AI agent analysis: {agent_output[:200]}...",
+            # Parse JSON vulnerabilities from agent output
+            vulnerabilities = []
+            try:
+                import re
+                
+                # Extract JSON array from agent output
+                json_match = re.search(r'\[.*?\]', agent_output, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(0)
+                    parsed_vulnerabilities = json.loads(json_str)
+                    
+                    # Validate and process each vulnerability
+                    for vuln_data in parsed_vulnerabilities:
+                        if isinstance(vuln_data, dict) and all(key in vuln_data for key in ['severity', 'type', 'title', 'description']):
+                            # Validate severity levels
+                            severity = vuln_data['severity'].upper()
+                            if severity not in ['HIGH', 'MEDIUM', 'LOW']:
+                                severity = 'MEDIUM'  # Default fallback
+                            
+                            vulnerabilities.append({
+                                "severity": severity,
+                                "type": vuln_data['type'],
+                                "title": vuln_data['title'],
+                                "description": vuln_data['description']
+                            })
+                
+                # Fallback: if no JSON found, try legacy detection
+                if not vulnerabilities:
+                    agent_output_lower = agent_output.lower()
+                    
+                    if 'sql injection' in agent_output_lower and ('successful' in agent_output_lower or 'vulnerability' in agent_output_lower):
+                        vulnerabilities.append({
+                            "severity": "HIGH",
+                            "type": "SQL Injection",
+                            "title": "Authentication Bypass via SQL Injection",
+                            "description": "The login form is vulnerable to SQL injection attacks. The agent was able to bypass authentication using malicious SQL payloads."
+                        })
+                    
+                    if 'xss' in agent_output_lower or 'cross-site scripting' in agent_output_lower:
+                        vulnerabilities.append({
+                            "severity": "MEDIUM",
+                            "type": "XSS",
+                            "title": "Cross-Site Scripting Vulnerability",
+                            "description": "The application is vulnerable to XSS attacks. User input is not properly sanitized before being reflected in the page."
+                        })
+                
+            except json.JSONDecodeError as e:
+                test_data.add_event(
+                    EventType.ERROR,
+                    f"Failed to parse agent JSON output: {str(e)}",
+                    GenericEventDetails(message=f"Agent output: {agent_output[:200]}...")
                 )
+                
+                # Emergency fallback - create generic vulnerability if indicators present
+                agent_output_lower = agent_output.lower()
+                if any(keyword in agent_output_lower for keyword in ['vulnerability', 'injection', 'xss', 'exploit', 'successful']):
+                    vulnerabilities.append({
+                        "severity": "MEDIUM",
+                        "type": "Security Vulnerability",
+                        "title": "Potential Security Issue Detected",
+                        "description": f"The security agent detected potential vulnerabilities: {agent_output[:200]}..."
+                    })
+
+            # Process vulnerabilities and add to results
+            for vuln_data in vulnerabilities:
+                # Create Vulnerability object
+                vulnerability = Vulnerability(
+                    severity=vuln_data["severity"],
+                    type=vuln_data["type"],
+                    title=vuln_data["title"],
+                    description=vuln_data["description"],
+                )
+
+                # Add to results
+                test_data.add_vulnerability(vulnerability)
+
+                # Add event
                 test_data.add_event(
                     EventType.VULNERABILITY,
-                    "Potential vulnerability detected by AI agent",
+                    f"Vulnerability detected: {vuln_data['title']}",
                     vulnerability,
                 )
-                test_data.add_vulnerability(vulnerability)
+
+            # Report vulnerability count
+            if vulnerabilities:
+                test_data.add_event(
+                    EventType.INFO,
+                    f"Total vulnerabilities found: {len(vulnerabilities)}",
+                    GenericEventDetails(
+                        data={"vulnerability_count": len(vulnerabilities)}
+                    ),
+                )
+            else:
+                test_data.add_event(
+                    EventType.INFO,
+                    "No vulnerabilities detected",
+                    GenericEventDetails(data={"vulnerability_count": 0})
+                )
 
             # Process intermediate steps for detailed events
             for step in test_results["intermediate_steps"]:
@@ -388,6 +472,23 @@ async def run_pentest(test_id: str, url: str):
                             f"Clicking element: {action.tool_input}",
                             ClickEventDetails(element=action.tool_input),
                         )
+
+            # Phase 3: Report Generation
+            test_data.current_phase = "Report Generation"
+            test_data.progress_percentage = 100
+            test_data.add_event(EventType.INFO, "Generating final report")
+
+            # Mark as completed
+            test_data.status = TestStatus.COMPLETED
+            test_data.progress_percentage = 100
+            test_data.current_phase = "Completed"
+
+            test_data.add_event(
+                EventType.INFO,
+                "Pentest completed",
+                GenericEventDetails(data={"vulnerabilities_found": len(test_data.results)}),
+            )
+
         else:
             # Agent test failed
             error_msg = test_results.get("error", "Unknown error")
@@ -396,22 +497,6 @@ async def run_pentest(test_id: str, url: str):
                 f"Agent testing failed: {error_msg}",
                 GenericEventDetails(message=error_msg),
             )
-
-        # Phase 3: Report Generation
-        test_data.current_phase = "Report Generation"
-        test_data.progress_percentage = 100
-        test_data.add_event(EventType.INFO, "Generating final report")
-
-        # Mark as completed
-        test_data.status = TestStatus.COMPLETED
-        test_data.progress_percentage = 100
-        test_data.current_phase = "Completed"
-
-        test_data.add_event(
-            EventType.INFO,
-            "Pentest completed",
-            GenericEventDetails(data={"vulnerabilities_found": len(test_data.results)}),
-        )
 
     except Exception as e:
         # Handle errors
