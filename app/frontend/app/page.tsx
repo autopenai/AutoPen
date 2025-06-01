@@ -8,6 +8,8 @@ import ScanHistoryComponent from "@/components/ScanHistory"
 import ScanInterface from "@/components/ScanInterface"
 import { Button } from "@/components/ui/button"
 import { getAllTests } from "@/lib/api"
+import logo from "@/public/logo.png"
+import Image from "next/image"
 
 export default function HomePage() {
   const [currentView, setCurrentView] = useState<"home" | "scanning">("home")
@@ -78,7 +80,7 @@ export default function HomePage() {
             >
               <div className="flex items-center justify-center space-x-3 mb-8">
                 <div className="relative">
-                  <Shield className="h-12 w-12 text-primary" />
+                  <Image src={logo} alt="AutoPen Logo" width={48} height={48} className="text-primary rounded-full" />
                   <motion.div
                     className="absolute inset-0 rounded-full border-2 border-primary/30"
                     animate={{
