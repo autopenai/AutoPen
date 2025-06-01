@@ -8,7 +8,15 @@ from datetime import datetime
 from enum import Enum
 import uuid
 
+# Import the new routers
+from routes.sql_injection import router as sql_injection_router
+from routes.bucket_checker import router as bucket_checker_router
+
 app = FastAPI(title="Pentest API", version="1.0.0")
+
+# Include the new routers
+app.include_router(sql_injection_router)
+app.include_router(bucket_checker_router)
 
 
 class TestStatus(str, Enum):
