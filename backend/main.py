@@ -5,7 +5,7 @@ from pydantic import BaseModel, HttpUrl, Field
 import asyncio
 import json
 from typing import Optional, Dict, AsyncGenerator, List
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 import uuid
 
@@ -77,7 +77,7 @@ class PentestData(BaseModel):
         """Add an event to this test"""
         event = PentestEvent(
             event_type=event_type,
-            timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             message=message,
             details=details,
         )
@@ -218,7 +218,7 @@ async def stream_test_events(test_id: str):
                 for event in current_events[last_event_index:]:
                     event_data = {
                         "event": event.event_type,
-                        "timestamp": event.timestamp.isoformat(),
+                        "timestamp": event.timestamp,
                         "message": event.message,
                         "details": event.details.dict() if event.details else None,
                     }
