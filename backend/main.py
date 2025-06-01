@@ -8,18 +8,10 @@ from datetime import datetime
 from enum import Enum
 import uuid
 
-# Import the new routers
-from routes.sql_injection import router as sql_injection_router
-from routes.bucket_checker import router as bucket_checker_router
-
 # Import the agent testing function
 from agent_with_playwright import run_vulnerability_test
 
 app = FastAPI(title="Pentest API", version="1.0.0")
-
-# Include the new routers
-app.include_router(sql_injection_router)
-app.include_router(bucket_checker_router)
 
 
 class TestStatus(str, Enum):
@@ -125,20 +117,8 @@ class PentestData(BaseModel):
         )
         self.events.append(event)
 
-    def add_vulnerability(
-        self,
-        severity: str,
-        vuln_type: str,
-        title: str,
-        description: str,
-    ):
+    def add_vulnerability(self, vulnerability: Vulnerability):
         """Add a vulnerability to the results"""
-        vulnerability = Vulnerability(
-            severity=severity,
-            type=vuln_type,
-            title=title,
-            description=description,
-        )
         self.results.append(vulnerability)
 
 
@@ -363,22 +343,18 @@ async def run_pentest(test_id: str, url: str):
 
             # Check for vulnerabilities
             if test_results["vulnerabilities_detected"]:
-                test_data.add_event(
-                    EventType.VULNERABILITY,
-                    "Potential vulnerability detected by AI agent",
-                    Vulnerability(
-                        severity="HIGH",
-                        type="AI-Detected Vulnerability",
-                        title="Potential Security Vulnerability",
-                        description=f"AI agent detected potential security issues: {agent_output[:200]}...",
-                    ),
-                )
-                test_data.add_vulnerability(
+                vulnerability = Vulnerability(
                     severity="HIGH",
-                    vuln_type="AI-Detected Vulnerability",
+                    type="AI-Detected Vulnerability",
                     title="Potential Security Vulnerability",
                     description=f"AI agent analysis: {agent_output[:200]}...",
                 )
+                test_data.add_event(
+                    EventType.VULNERABILITY,
+                    "Potential vulnerability detected by AI agent",
+                    vulnerability,
+                )
+                test_data.add_vulnerability(vulnerability)
 
             # Process intermediate steps for detailed events
             for step in test_results["intermediate_steps"]:
