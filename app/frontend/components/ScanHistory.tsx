@@ -97,6 +97,23 @@ const ScanHistoryComponent: React.FC<ScanHistoryProps> = ({ history, onSelectSca
                       </div>
                     )}
                   </div>
+                  {/* Security Findings Tab */}
+                  {scan.results && scan.results.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      {scan.results.map((finding: any, idx: number) => (
+                        <div key={idx} className="p-2 rounded bg-muted/30 border text-xs">
+                          <div>
+                            <span className="font-semibold">{finding.title}</span>
+                            <span className={`ml-2 px-2 py-0.5 rounded text-white ${finding.severity === "HIGH" ? "bg-red-500" : finding.severity === "MEDIUM" ? "bg-yellow-500" : "bg-blue-500"}`}>
+                              {finding.severity}
+                            </span>
+                          </div>
+                          <div className="italic">{finding.type}</div>
+                          <div>{finding.description}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </motion.div>
