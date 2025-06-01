@@ -61,16 +61,16 @@ const ScanHistoryComponent: React.FC<ScanHistoryProps> = ({ history, onSelectSca
             >
               <Card className="bg-card/50 border-border hover:bg-card/80 transition-colors h-full">
                 <CardHeader className="pb-2">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <CardTitle className="text-sm font-medium truncate">{scan.url}</CardTitle>
-                      <CardDescription className="text-xs text-muted-foreground">
+                  <div className="flex items-start justify-between space-x-4">
+                    <div className="flex-1 min-w-0">
+                      <CardTitle className="text-sm font-medium truncate max-w-full">{scan.url}</CardTitle>
+                      <CardDescription className="text-xs text-muted-foreground truncate">
                         {scan.timestamp.toLocaleDateString()}
                       </CardDescription>
                     </div>
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center space-x-2 flex-shrink-0">
                       {getSeverityIcon(severity)}
-                      <Badge variant="outline" className="text-xs">
+                      <Badge variant="outline" className="text-xs whitespace-nowrap">
                         {totalFindings} findings
                       </Badge>
                     </div>
