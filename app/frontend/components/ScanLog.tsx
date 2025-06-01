@@ -6,12 +6,12 @@ import { Card, CardContent } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
-import type { PentestEvent, ApiResult, EventType } from "@/types/pentest"
+import type { PentestEvent, TestResult, EventType } from "@/types/pentest"
 
 interface ScanLogProps {
   events: PentestEvent[]
-  results: ApiResult[]
-  onResultHover?: (result: ApiResult | null) => void
+  results: TestResult[]
+  onResultHover?: (result: TestResult | null) => void
   onEventClick?: (event: PentestEvent | null) => void
   selectedEvent?: PentestEvent | null
 }
@@ -67,7 +67,7 @@ const ScanLog: React.FC<ScanLogProps> = ({ events, results, onResultHover, onEve
       acc[severity].push(result)
       return acc
     },
-    {} as Record<string, ApiResult[]>,
+    {} as Record<string, TestResult[]>,
   )
 
   const formatEventDetails = (event: PentestEvent) => {
@@ -209,7 +209,7 @@ const ScanLog: React.FC<ScanLogProps> = ({ events, results, onResultHover, onEve
                                         {result.description.substring(0, 100)}...
                                       </p>
                                       <div className="flex items-center justify-between text-xs text-muted-foreground mt-2">
-                                        <span>{result.type}</span>
+                                        <span>{result.vulnerability_type}</span>
                                       </div>
                                     </div>
                                   </div>

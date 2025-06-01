@@ -299,7 +299,7 @@ const ScanInterface: React.FC<ScanInterfaceProps> = ({ initialUrl, testId, onBac
               src={currentUrl}
               className="w-full h-full border-0"
               title="Target Website"
-              sandbox="allow-scripts allow-same-origin"
+              sandbox="allow-forms allow-scripts allow-same-origin"
             />
 
             {/* Scanning overlays */}
