@@ -93,7 +93,7 @@ export default function HomePage() {
                   />
                 </div>
                 <h1 className="text-4xl md:text-6xl font-bold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
-                  PenTest Agent
+                  AutoPen
                 </h1>
               </div>
 

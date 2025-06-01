@@ -7,21 +7,13 @@ import { Providers } from "./providers"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "PenTest Agent - Automated Security Scanner",
+  title: "AutoPen - Automated Cybersec Scanner",
   description: "Automated Penetration Testing Agent",
-  authors: [{ name: "Lovable" }],
   openGraph: {
-    title: "PenTest Agent",
+    title: "AutoPen",
     description: "Automated Penetration Testing Agent",
     type: "website",
-    images: ["https://lovable.dev/opengraph-image-p98pqg.png"],
   },
-  twitter: {
-    card: "summary_large_image",
-    site: "@lovable_dev",
-    images: ["https://lovable.dev/opengraph-image-p98pqg.png"],
-  },
-    generator: 'v0.dev'
 }
 
 export default function RootLayout({

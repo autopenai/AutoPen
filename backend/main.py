@@ -255,7 +255,7 @@ async def run_pentest(test_id: str, url: str):
         # Update status to running
         test_data.status = TestStatus.RUNNING
         test_data.add_event(
-            EventType.INFO, "Pentest started", GenericEventDetails(data={"url": url})
+            EventType.INFO, "AutoPen started", GenericEventDetails(data={"url": url})
         )
 
         # Phase 1: Reconnaissance
