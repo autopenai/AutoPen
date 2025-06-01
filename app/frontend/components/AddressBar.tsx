@@ -22,10 +22,10 @@ const AddressBar: React.FC<AddressBarProps> = ({ onScan, isScanning = false }) =
   }
 
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-5xl mx-auto mb-12">
-      <div className="bg-white rounded-t-lg shadow-2xl">
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-5xl mx-auto relative">
+      <div className="bg-white rounded-2xl shadow-2xl relative overflow-hidden">
         {/* Browser Header */}
-        <div className="flex items-center justify-between px-4 py-3 bg-gray-100 rounded-t-lg border-b border-gray-200">
+        <div className="flex items-center justify-between px-4 py-3 bg-gray-100 rounded-2xl border-b border-gray-200">
           {/* Window Controls */}
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 bg-red-500 rounded-full"></div>
@@ -34,13 +34,16 @@ const AddressBar: React.FC<AddressBarProps> = ({ onScan, isScanning = false }) =
           </div>
         </div>
 
+        {/* Extra Padding Above Search Bar */}
+        <div className="pt-2" />
+
         {/* Browser Toolbar */}
         <form
           onSubmit={e => {
             e.preventDefault();
             handleScan();
           }}
-          className="flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-200"
+          className="flex items-center gap-3 px-4 py-3 bg-white"
         >
           {/* Navigation Buttons */}
           <div className="flex items-center gap-1">
@@ -104,8 +107,7 @@ const AddressBar: React.FC<AddressBarProps> = ({ onScan, isScanning = false }) =
           </Button>
         </form>
 
-        {/* Browser Content Area (empty, for layout) */}
-        <div className="bg-white p-8 rounded-b-lg min-h-[40px]" />
+        <div className="p-2 rounded-b-lg min-h-[10px] z-0 bg-white relative"></div>
       </div>
     </motion.div>
   )
