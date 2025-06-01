@@ -1,6 +1,6 @@
 import type { Test, NewTestResponse, PentestEvent } from "@/types/pentest";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
+const API_BASE_URL = "https://sf-hackathon-p0-production.up.railway.app";
 
 // Helper function to make API requests with proper error handling and timeout
 async function makeApiRequest(
@@ -133,6 +133,10 @@ export function subscribeToTestEvents(
             `Test ${testId} completed with status: ${testData.status}`
           );
           isPolling = false;
+
+          //TODO
+          const finalTestData = await getTestById(testId);
+          console.log("Final test details received:", finalTestData);
           return;
         }
       }
