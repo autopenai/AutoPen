@@ -340,7 +340,7 @@ async def run_pentest(test_id: str, url: str):
             test_data.add_event(EventType.INFO, f"Starting {phase_name}")
 
             # Simulate different types of events during web app testing
-            if phase_name == "Web App Te1a0eed4a-359c-4882-824f-771625faa9desting":
+            if phase_name == "Web App Testing":
                 await simulate_web_testing(test_data)
             else:
                 # Simulate other scanning activities
