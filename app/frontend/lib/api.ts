@@ -1,6 +1,6 @@
 import type { Test, NewTestResponse, PentestEvent } from "@/types/pentest";
 
-const API_BASE_URL = "https://sf-hackathon-p0-production.up.railway.app";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://sf-hackathon-p0-production.up.railway.app";
 
 // Helper function to make API requests with proper error handling and timeout
 async function makeApiRequest(
