@@ -21,9 +21,9 @@ from bot.playwright_interface import WebSession, ContentFormat, SessionConfig
 
 
 async def test_basic_scraping():
-    """Test basic scraping functionality on localhost:5000"""
+    """Test basic scraping functionality on localhost:8080"""
     
-    url = "http://localhost:5000"
+    url = "http://localhost:8080"
     
     print(f"🚀 Testing scraping on {url}")
     
@@ -36,6 +36,7 @@ async def test_basic_scraping():
     try:
         # Test using context manager (recommended approach)
         async with WebSession(url, config) as session:
+            html_content = await session.get_content(format=ContentFormat.HTML)
             print("✅ Browser session started successfully")
             
             # Test 1: Get HTML content
@@ -95,12 +96,12 @@ async def test_basic_scraping():
 async def test_simple_server_check():
     """Test if we can even connect to the server"""
     
-    url = "http://localhost:5000"
+    url = "http://localhost:8080"
     
     print(f"🔍 Testing connection to {url}")
     
     try:
-        config = SessionConfig(headless=True, timeout=5000)
+        config = SessionConfig(headless=True, timeout=8080)
         session = WebSession(url, config)
         await session.start()
         
@@ -118,7 +119,7 @@ async def test_simple_server_check():
         
     except Exception as e:
         print(f"❌ Cannot connect to {url}: {e}")
-        print("Make sure you have a web server running on localhost:5000")
+        print("Make sure you have a web server running on localhost:8080")
         return False
 
 
@@ -131,9 +132,9 @@ def main():
     # First, test simple connection
     print("\n📡 Step 1: Testing basic connection...")
     if not asyncio.run(test_simple_server_check()):
-        print("\n💡 To test this script, you need a web server running on localhost:5000")
+        print("\n💡 To test this script, you need a web server running on localhost:8080")
         print("You can start a simple server with:")
-        print("  python -m http.server 5000")
+        print("  python -m http.server 8080")
         print("Or modify the URL in this script to test a different server.")
         return
     

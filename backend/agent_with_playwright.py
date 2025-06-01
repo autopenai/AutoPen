@@ -43,95 +43,116 @@ from bot.playwright_interface import WebSession, SessionConfig, ContentFormat
 current_session: Optional[WebSession] = None
 
 
-class PlaywrightWrapper:
-    """Wrapper class to provide sync-like interface to async WebSession"""
+class InputTextBoxInput(BaseModel):
+    """Input for InputTextBoxTool"""
+    query: str = Field(description="Selector and text in format 'selector,text' (e.g., \"input[name='username'],admin\")")
+
+
+class InputTextBoxTool(BaseTool):
+    """Tool for inputting text into form fields"""
+    name: str = "input_textbox"
+    description: str = """Use this to enter text into any input field on the webpage.
+    Input should be: selector,text (e.g., "input[name='username'],admin")"""
+    args_schema: Type[BaseModel] = InputTextBoxInput
     
-    def __init__(self):
-        self.session: Optional[WebSession] = None
-        self.loop = None
+    def _run(self, query: str) -> str:
+        """Synchronous version - not used"""
+        return "Error: Use async version"
     
-    async def initialize(self, url: str, headless: bool = True):
-        """Initialize the Playwright session"""
-        config = SessionConfig(headless=headless, timeout=5000)  # 5 second timeout for local testing
-        self.session = WebSession(url, config)
-        await self.session.start()
-        return self.session
-    
-    def run_async(self, coro):
-        """Run async function in a safe way"""
+    async def _arun(self, query: str) -> str:
+        """Execute the tool asynchronously"""
+        print(f"Inputting text with query: {query}")
         try:
-            # Try to get the current loop
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # No loop running, create a new one
-            return asyncio.run(coro)
-        else:
-            # Loop is running, we need to handle this differently
-            import concurrent.futures
-            import threading
+            if not query or query.lower() in ['none', 'null', '']:
+                return "Error: Input required in format 'selector,text'"
             
-            def run_in_thread():
-                new_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(new_loop)
-                try:
-                    return new_loop.run_until_complete(coro)
-                finally:
-                    new_loop.close()
+            parts = query.split(',', 1)
+            if len(parts) != 2:
+                return "Error: Input should be 'selector,text'"
+            selector, text = parts[0].strip(), parts[1].strip()
             
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(run_in_thread)
-                return future.result(timeout=30)  # 30 second timeout
-    
-    async def input_textbox(self, selector: str, text: str) -> str:
-        """Type text into an input field"""
-        if not self.session:
-            return "Error: Session not initialized"
-        try:
-            await self.session.fill_input(selector, text)
+            if not current_session:
+                return "Error: Session not initialized"
+            
+            await current_session.fill_input(selector, text)
             return f"Successfully typed '{text}' into element with selector '{selector}'"
         except Exception as e:
-            return f"Error typing into textbox: {str(e)}"
+            return f"Error typing into textbox: {str(e)}\n{traceback.format_exc()}"
+
+
+class ClickButtonInput(BaseModel):
+    """Input for ClickButtonTool"""
+    query: str = Field(description="CSS selector for the button to click (e.g., \"input[type='submit']\")")
+
+
+class ClickButtonTool(BaseTool):
+    """Tool for clicking buttons or clickable elements"""
+    name: str = "click_button"
+    description: str = """Use this to click buttons, submit forms, or click any clickable element.
+    Input should be the CSS selector (e.g., "input[type='submit']")"""
+    args_schema: Type[BaseModel] = ClickButtonInput
     
-    async def click_button(self, selector: str) -> str:
-        """Click a button or element"""
-        if not self.session:
-            return "Error: Session not initialized"
+    def _run(self, query: str) -> str:
+        """Synchronous version - not used"""
+        return "Error: Use async version"
+    
+    async def _arun(self, query: str) -> str:
+        """Execute the tool asynchronously"""
+        print(f"Clicking button with query: {query}")
         try:
-            await self.session.click(selector)
+            if not query or query.lower() in ['none', 'null', '']:
+                return "Error: CSS selector required"
+            
+            selector = query.strip()
+            if not current_session:
+                return "Error: Session not initialized"
+            
+            await current_session.click(selector)
             # Wait a moment for any page changes
             await asyncio.sleep(1)
             return f"Successfully clicked element with selector '{selector}'"
         except Exception as e:
-            return f"Error clicking button: {str(e)}"
+            return f"Error clicking button: {str(e)}\n{traceback.format_exc()}"
+
+
+class ScrapePageInput(BaseModel):
+    """Input for ScrapePageTool"""
+    query: str = Field(default="scrape", description="Optional query (use 'scrape' or leave empty)")
+
+
+class ScrapePageTool(BaseTool):
+    """Tool for scraping the current page content"""
+    name: str = "scrape_page"
+    description: str = """Use this to get the current page content, including text and form structure.
+    Input: just use 'scrape' or any text (the actual input doesn't matter)"""
+    args_schema: Type[BaseModel] = ScrapePageInput
     
-    async def scrape_page(self) -> str:
-        print("\n\nScraping page through Playwright")
-        """Scrape the current page content"""
-        if not self.session:
-            print("Error: Session not initialized")
-            return "Error: Session not initialized"
+    def _run(self, query: str = "scrape") -> str:
+        """Synchronous version - not used"""
+        return "Error: Use async version"
+    
+    async def _arun(self, query: str = "scrape") -> str:
+        """Execute the tool asynchronously"""
+        print(f"Scraping page with query: {query}")
         try:
+            if not current_session:
+                return "Error: Session not initialized"
+            
             print("Getting text content...")
-            # Get text content for better readability by the LLM with timeout
+            # Get text content for better readability by the LLM
             try:
-                content = await asyncio.wait_for(
-                    self.session.get_content(ContentFormat.TEXT), 
-                    timeout=8.0
-                )
-            except asyncio.TimeoutError:
-                print("Text content retrieval timed out, trying fallback...")
-                content = "Text content retrieval timed out"
+                content = await current_session.get_content(format=ContentFormat.TEXT)
+            except Exception as e:
+                print(f"Text content retrieval failed: {e}")
+                content = "Text content retrieval failed"
             
             print("Getting HTML content...")
-            # Also get some HTML structure for form detection with timeout
+            # Also get some HTML structure for form detection
             try:
-                html_content = await asyncio.wait_for(
-                    self.session.get_content(ContentFormat.HTML), 
-                    timeout=8.0
-                )
-            except asyncio.TimeoutError:
-                print("HTML content retrieval timed out, using minimal HTML...")
-                html_content = "<html><body>HTML retrieval timed out</body></html>"
+                html_content = await current_session.get_content(format=ContentFormat.HTML)
+            except Exception as e:
+                print(f"HTML content retrieval failed: {e}")
+                html_content = "<html><body>HTML retrieval failed</body></html>"
             
             print("Parsing HTML with BeautifulSoup...")
             # Extract form information
@@ -181,100 +202,6 @@ class PlaywrightWrapper:
         except Exception as e:
             print(f"Error during scraping: {str(e)}")
             return f"Error scraping page: {str(e)}\n{traceback.format_exc()}"
-    
-    async def cleanup(self):
-        """Clean up the session"""
-        if self.session:
-            await self.session.close()
-
-
-# Global wrapper instance
-playwright_wrapper = PlaywrightWrapper()
-
-
-class InputTextBoxInput(BaseModel):
-    """Input for InputTextBoxTool"""
-    query: str = Field(description="Selector and text in format 'selector,text' (e.g., \"input[name='username'],admin\")")
-
-
-class InputTextBoxTool(BaseTool):
-    """Tool for inputting text into form fields"""
-    name: str = "input_textbox"
-    description: str = """Use this to enter text into any input field on the webpage.
-    Input should be: selector,text (e.g., "input[name='username'],admin")"""
-    args_schema: Type[BaseModel] = InputTextBoxInput
-    
-    def _run(self, query: str) -> str:
-        print(f"Inputting text with query: {query}")
-        """Execute the tool synchronously by running async code"""
-        try:
-            if not query or query.lower() in ['none', 'null', '']:
-                return "Error: Input required in format 'selector,text'"
-            
-            parts = query.split(',', 1)
-            if len(parts) != 2:
-                return "Error: Input should be 'selector,text'"
-            selector, text = parts[0].strip(), parts[1].strip()
-            
-            return playwright_wrapper.run_async(
-                playwright_wrapper.input_textbox(selector, text)
-            )
-        except Exception as e:
-            return f"Error: {str(e)}\n{traceback.format_exc()}"
-
-
-class ClickButtonInput(BaseModel):
-    """Input for ClickButtonTool"""
-    query: str = Field(description="CSS selector for the button to click (e.g., \"input[type='submit']\")")
-
-
-class ClickButtonTool(BaseTool):
-    """Tool for clicking buttons or clickable elements"""
-    name: str = "click_button"
-    description: str = """Use this to click buttons, submit forms, or click any clickable element.
-    Input should be the CSS selector (e.g., "input[type='submit']")"""
-    args_schema: Type[BaseModel] = ClickButtonInput
-    
-    def _run(self, query: str) -> str:
-        print(f"Clicking button with query: {query}")
-        """Execute the tool synchronously"""
-        try:
-            if not query or query.lower() in ['none', 'null', '']:
-                return "Error: CSS selector required"
-            
-            selector = query.strip()
-            return playwright_wrapper.run_async(
-                playwright_wrapper.click_button(selector)
-            )
-        except Exception as e:
-            return f"Error: {str(e)}\n{traceback.format_exc()}"
-
-
-class ScrapePageInput(BaseModel):
-    """Input for ScrapePageTool"""
-    query: str = Field(default="scrape", description="Optional query (use 'scrape' or leave empty)")
-
-
-class ScrapePageTool(BaseTool):
-    """Tool for scraping the current page content"""
-    name: str = "scrape_page"
-    description: str = """Use this to get the current page content, including text and form structure.
-    Input: just use 'scrape' or any text (the actual input doesn't matter)"""
-    args_schema: Type[BaseModel] = ScrapePageInput
-    
-    def _run(self, query: str = "scrape") -> str:
-        print(f"Scraping page with query: {query}")
-        """Execute the tool synchronously"""
-        try:
-            # Handle None or empty input gracefully
-            if query is None:
-                query = "scrape"
-            
-            return playwright_wrapper.run_async(
-                playwright_wrapper.scrape_page()
-            )
-        except Exception as e:
-            return f"Error: {str(e)}\n{traceback.format_exc()}"
 
 
 def create_vulnerability_agent() -> AgentExecutor:
@@ -348,55 +275,63 @@ async def main():
     print("🚀 Starting vulnerability assessment...")
     
     try:
-        # Initialize Playwright session
+        # Initialize Playwright session using context manager (like your working test)
         print("🌐 Initializing browser session...")
-        await playwright_wrapper.initialize(target_url, headless=True)
+        config = SessionConfig(headless=True, timeout=10000)
         
-        # Create and run the agent
-        print("🤖 Creating LangChain agent...")
-        agent = create_vulnerability_agent()
+        async with WebSession(target_url, config) as session:
+            # Store session globally for tools to access
+            global current_session
+            current_session = session
+            
+            print("✅ Browser session started successfully")
+            
+            # Create and run the agent
+            print("🤖 Creating LangChain agent...")
+            agent = create_vulnerability_agent()
+            
+            # Initial prompt for the agent
+            initial_prompt = f"""
+            You are a web security expert testing the login page at {target_url} for SQL injection vulnerabilities.
+            
+            You have access to three tools:
+            1. scrape_page: Get current page content and detect forms/inputs (Action Input: "scrape")
+            2. input_textbox: Enter text into input fields (Action Input: "selector,text")
+            3. click_button: Click buttons or submit forms (Action Input: "selector")
+            
+            IMPORTANT: Always provide proper Action Input strings - never use None, null, or empty values.
+            
+            Please follow these steps systematically:
+            1. Use scrape_page with Action Input "scrape" to understand the page structure
+            2. Identify login form fields (username/password inputs)
+            3. Test SQL injection by:
+               - Using input_textbox with Action Input "input[name='username'],admin" to enter username
+               - Using input_textbox with Action Input "input[name='password'],' OR 1=1--" to enter malicious password  
+               - Using click_button with Action Input "input[type='submit']" to submit the form
+            4. Use scrape_page with Action Input "scrape" again to check if login was successful
+            5. Look for signs of successful login (welcome messages, dashboard, etc.)
+            6. Report whether SQL injection vulnerability was detected
+            
+            Begin your assessment now.
+            """
+            
+            print("🔍 Running vulnerability assessment...")
+            
+            # Run the agent asynchronously
+            result = await agent.ainvoke({"input": initial_prompt})
+            
+            print("\n" + "="*60)
+            print("🏁 FINAL ASSESSMENT RESULT:")
+            print("="*60)
+            print(result.get("output", "No output available"))
+            print("="*60)
         
-        # Initial prompt for the agent
-        initial_prompt = f"""
-        You are a web security expert testing the login page at {target_url} for SQL injection vulnerabilities.
-        
-        You have access to three tools:
-        1. scrape_page: Get current page content and detect forms/inputs (Action Input: "scrape")
-        2. input_textbox: Enter text into input fields (Action Input: "selector,text")
-        3. click_button: Click buttons or submit forms (Action Input: "selector")
-        
-        IMPORTANT: Always provide proper Action Input strings - never use None, null, or empty values.
-        
-        Please follow these steps systematically:
-        1. Use scrape_page with Action Input "scrape" to understand the page structure
-        2. Identify login form fields (username/password inputs)
-        3. Test SQL injection by:
-           - Using input_textbox with Action Input "input[name='username'],admin" to enter username
-           - Using input_textbox with Action Input "input[name='password'],' OR 1=1--" to enter malicious password  
-           - Using click_button with Action Input "input[type='submit']" to submit the form
-        4. Use scrape_page with Action Input "scrape" again to check if login was successful
-        5. Look for signs of successful login (welcome messages, dashboard, etc.)
-        6. Report whether SQL injection vulnerability was detected
-        
-        Begin your assessment now.
-        """
-        
-        print("🔍 Running vulnerability assessment...")
-        result = agent.invoke({"input": initial_prompt})
-        
-        print("\n" + "="*60)
-        print("🏁 FINAL ASSESSMENT RESULT:")
-        print("="*60)
-        print(result.get("output", "No output available"))
-        print("="*60)
+        # Session automatically closed by context manager
+        print("🧹 Browser session closed")
         
     except Exception as e:
         print(f"❌ Error during assessment: {str(e)}")
         traceback.print_exc()
-    finally:
-        # Clean up
-        print("🧹 Cleaning up browser session...")
-        await playwright_wrapper.cleanup()
 
 
 if __name__ == "__main__":
