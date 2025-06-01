@@ -1,68 +1,109 @@
 "use client"
 
 import type React from "react"
-import { Terminal, AlertCircle, CheckCircle, AlertTriangle, Shield } from "lucide-react"
+import { Terminal, AlertCircle, AlertTriangle, Shield } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
-import type { LogEntry, SecurityFinding } from "@/types/pentest"
+import type { PentestEvent, ApiResult, EventType } from "@/types/pentest"
 
 interface ScanLogProps {
-  logs: LogEntry[]
-  findings: SecurityFinding[]
-  onFindingHover?: (finding: SecurityFinding | null) => void
-  onLogClick?: (log: LogEntry | null) => void
-  selectedLog?: LogEntry | null
+  events: PentestEvent[]
+  results: ApiResult[]
+  onResultHover?: (result: ApiResult | null) => void
+  onEventClick?: (event: PentestEvent | null) => void
+  selectedEvent?: PentestEvent | null
 }
 
-const ScanLog: React.FC<ScanLogProps> = ({ logs, findings, onFindingHover, onLogClick, selectedLog }) => {
-  const getLogIcon = (type: LogEntry["type"]) => {
-    switch (type) {
+const ScanLog: React.FC<ScanLogProps> = ({ events, results, onResultHover, onEventClick, selectedEvent }) => {
+  const getEventIcon = (eventType: EventType) => {
+    switch (eventType) {
       case "error":
         return <AlertCircle className="h-4 w-4 text-red-400" />
-      case "warning":
+      case "vulnerability":
         return <AlertTriangle className="h-4 w-4 text-yellow-400" />
-      case "success":
-        return <CheckCircle className="h-4 w-4 text-green-400" />
+      case "load":
+      case "click":
+      case "input":
       case "info":
       default:
         return null // No icon for regular info logs
     }
   }
 
-  const getSeverityIcon = (severity: SecurityFinding["severity"]) => {
-    switch (severity) {
+  const getSeverityIcon = (severity: string) => {
+    switch (severity.toLowerCase()) {
       case "high":
         return <AlertCircle className="h-4 w-4 text-red-500" />
       case "medium":
         return <AlertTriangle className="h-4 w-4 text-yellow-500" />
       case "low":
         return <Shield className="h-4 w-4 text-blue-500" />
+      default:
+        return <Shield className="h-4 w-4 text-blue-500" />
     }
   }
 
-  const getSeverityColor = (severity: SecurityFinding["severity"]) => {
-    switch (severity) {
+  const getSeverityColor = (severity: string) => {
+    switch (severity.toLowerCase()) {
       case "high":
         return "bg-red-500/10 text-red-400 border-red-500/20"
       case "medium":
         return "bg-yellow-500/10 text-yellow-400 border-yellow-500/20"
       case "low":
         return "bg-blue-500/10 text-blue-400 border-blue-500/20"
+      default:
+        return "bg-blue-500/10 text-blue-400 border-blue-500/20"
     }
   }
 
-  const groupedFindings = findings.reduce(
-    (acc, finding) => {
-      if (!acc[finding.severity]) {
-        acc[finding.severity] = []
+  const groupedResults = results.reduce(
+    (acc, result) => {
+      const severity = result.severity.toLowerCase()
+      if (!acc[severity]) {
+        acc[severity] = []
       }
-      acc[finding.severity].push(finding)
+      acc[severity].push(result)
       return acc
     },
-    {} as Record<SecurityFinding["severity"], SecurityFinding[]>,
+    {} as Record<string, ApiResult[]>,
   )
+
+  const formatEventDetails = (event: PentestEvent) => {
+    if (!event.details) return null
+
+    // Handle the API schema structure: details: { message: string | null, data: object | null }
+    const { message, data } = event.details as { message?: string | null; data?: any | null }
+
+    const formattedDetails: string[] = []
+
+    // Add message if it exists
+    if (message) {
+      formattedDetails.push(`Message: ${message}`)
+    }
+
+    // Handle data object based on event type
+    if (data) {
+      if (event.event_type === "load" && data.url) {
+        formattedDetails.push(`URL: ${data.url}`)
+      } else if (event.event_type === "input" && data.field) {
+        formattedDetails.push(`Field: ${data.field}`)
+        if (data.test_value) {
+          formattedDetails.push(`Test Value: ${data.test_value}`)
+        }
+      } else if (event.event_type === "info" && data.url) {
+        formattedDetails.push(`Target URL: ${data.url}`)
+      } else if (event.event_type === "info" && data.vulnerabilities_found !== undefined) {
+        formattedDetails.push(`Vulnerabilities Found: ${data.vulnerabilities_found}`)
+      } else {
+        // For any other data, show as JSON
+        formattedDetails.push(`Data: ${JSON.stringify(data, null, 2)}`)
+      }
+    }
+
+    return formattedDetails.length > 0 ? formattedDetails.join("\n") : null
+  }
 
   const mockCode = `<form action="/login" method="POST">
   <input type="text" name="username" />
@@ -87,24 +128,38 @@ const ScanLog: React.FC<ScanLogProps> = ({ logs, findings, onFindingHover, onLog
                   </AccordionTrigger>
                   <AccordionContent className="p-0">
                     <div className="p-4 space-y-2">
-                      {logs.map((log, index) => {
-                        const icon = getLogIcon(log.type)
+                      {events.map((event, index) => {
+                        const icon = getEventIcon(event.event_type)
+                        const details = formatEventDetails(event)
+                        const timestamp = new Date(event.timestamp).toLocaleTimeString()
+
                         return (
                           <div
-                            key={log.id}
+                            key={`${event.event_type}-${index}`}
                             className="flex items-start space-x-3 p-2 rounded hover:bg-background/30 transition-colors cursor-pointer"
-                            onClick={() => onLogClick?.(log)}
+                            onClick={() => onEventClick?.(event)}
                             onMouseEnter={() => {
-                              const associatedFinding = findings.find((f) => f.title === log.message)
-                              if (associatedFinding) onFindingHover?.(associatedFinding)
+                              // Handle vulnerability events that might have vulnerability data in details.data
+                              if (event.event_type === "vulnerability" && event.details?.data) {
+                                const vulnData = event.details.data
+                                if (vulnData.title) {
+                                  const matchingResult = results.find((r) => r.title === vulnData.title)
+                                  if (matchingResult) onResultHover?.(matchingResult)
+                                }
+                              }
                             }}
-                            onMouseLeave={() => onFindingHover?.(null)}
+                            onMouseLeave={() => onResultHover?.(null)}
                           >
-                            {icon && <div className="flex-shrink-0 mt-0.5">{icon}</div>}
+                            <div className="flex-shrink-0 mt-0.5 w-4 h-4 flex items-center justify-center">{icon}</div>
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm text-foreground leading-relaxed">{log.message}</p>
-                              {log.details && (
-                                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{log.details}</p>
+                              <div className="flex items-center justify-between">
+                                <p className="text-sm text-foreground leading-relaxed">{event.message}</p>
+                                <span className="text-xs text-muted-foreground ml-2">{timestamp}</span>
+                              </div>
+                              {details && (
+                                <pre className="text-xs text-muted-foreground mt-1 leading-relaxed font-mono whitespace-pre-wrap">
+                                  {details}
+                                </pre>
                               )}
                             </div>
                           </div>
@@ -121,7 +176,7 @@ const ScanLog: React.FC<ScanLogProps> = ({ logs, findings, onFindingHover, onLog
                   <AccordionTrigger className="flex items-center justify-between w-full p-4 border-b border-border bg-card/50 hover:bg-card/70 transition-colors">
                     <div className="flex items-center space-x-2">
                       <Shield className="h-5 w-5" />
-                      <span className="text-lg font-semibold">Security Findings ({findings.length})</span>
+                      <span className="text-lg font-semibold">Security Findings ({results.length})</span>
                     </div>
                   </AccordionTrigger>
                   <AccordionContent className="p-0">
@@ -134,7 +189,7 @@ const ScanLog: React.FC<ScanLogProps> = ({ logs, findings, onFindingHover, onLog
                               {getSeverityIcon(severity)}
                               <div>
                                 <p className="text-xs font-medium capitalize">{severity}</p>
-                                <p className="text-lg font-bold">{groupedFindings[severity]?.length || 0}</p>
+                                <p className="text-lg font-bold">{groupedResults[severity]?.length || 0}</p>
                               </div>
                             </div>
                           </div>
@@ -143,46 +198,46 @@ const ScanLog: React.FC<ScanLogProps> = ({ logs, findings, onFindingHover, onLog
 
                       {/* Individual Findings */}
                       <div className="space-y-3">
-                        {findings.map((finding, index) => (
-                          <Accordion key={finding.id} type="single" collapsible>
-                            <AccordionItem value={finding.id} className="border border-border/50 rounded-lg">
+                        {results.map((result, index) => (
+                          <Accordion key={`result-${index}`} type="single" collapsible>
+                            <AccordionItem value={`result-${index}`} className="border border-border/50 rounded-lg">
                               <AccordionTrigger
-                                onMouseEnter={() => onFindingHover?.(finding)}
-                                onMouseLeave={() => onFindingHover?.(null)}
-                                onClick={() =>
-                                  onLogClick?.({
-                                    id: finding.id,
-                                    timestamp: finding.timestamp,
-                                    type: "error",
-                                    message: finding.title,
-                                    details: finding.description,
-                                  })
-                                }
+                                onMouseEnter={() => onResultHover?.(result)}
+                                onMouseLeave={() => onResultHover?.(null)}
                                 className="p-3 hover:bg-background/70 transition-colors"
                               >
                                 <div className="flex items-start justify-between w-full">
                                   <div className="flex items-start space-x-2 flex-1">
-                                    {getSeverityIcon(finding.severity)}
+                                    {getSeverityIcon(result.severity)}
                                     <div className="text-left">
-                                      <span className="text-sm font-medium">{finding.title}</span>
-                                      <p className="text-xs text-muted-foreground mt-1">{finding.description}</p>
+                                      <span className="text-sm font-medium">{result.title}</span>
+                                      <p className="text-xs text-muted-foreground mt-1">
+                                        {result.description.substring(0, 100)}...
+                                      </p>
                                       <div className="flex items-center justify-between text-xs text-muted-foreground mt-2">
-                                        <span>{finding.location}</span>
+                                        <span>{result.type}</span>
                                       </div>
                                     </div>
                                   </div>
                                   <div className="flex items-center space-x-2">
-                                    <Badge className={getSeverityColor(finding.severity)} variant="outline">
-                                      {finding.severity.toUpperCase()}
+                                    <Badge className={getSeverityColor(result.severity)} variant="outline">
+                                      {result.severity.toUpperCase()}
                                     </Badge>
                                   </div>
                                 </div>
                               </AccordionTrigger>
                               <AccordionContent className="p-3 pt-0">
-                                <div className="bg-background/50 border border-border rounded-lg p-4">
-                                  <pre className="text-xs text-foreground overflow-auto">
-                                    <code>{mockCode}</code>
-                                  </pre>
+                                <div className="space-y-3">
+                                  <div className="text-sm">
+                                    <p className="font-medium mb-2">Full Description:</p>
+                                    <p className="text-muted-foreground leading-relaxed">{result.description}</p>
+                                  </div>
+                                  <div className="bg-background/50 border border-border rounded-lg p-4">
+                                    <p className="text-xs font-medium mb-2">Related Code:</p>
+                                    <pre className="text-xs text-foreground overflow-auto">
+                                      <code>{mockCode}</code>
+                                    </pre>
+                                  </div>
                                 </div>
                               </AccordionContent>
                             </AccordionItem>
@@ -190,7 +245,7 @@ const ScanLog: React.FC<ScanLogProps> = ({ logs, findings, onFindingHover, onLog
                         ))}
                       </div>
 
-                      {findings.length === 0 && (
+                      {results.length === 0 && (
                         <div className="text-center py-8">
                           <Shield className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                           <p className="text-muted-foreground">No security findings yet</p>
