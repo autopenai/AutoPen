@@ -1,4 +1,4 @@
-# SQL Injection Testing Agent with LangChain + Playwright
+# AutoPen
 
 A powerful automated security testing agent that uses LangChain and Playwright to detect SQL injection vulnerabilities in login pages.
 
