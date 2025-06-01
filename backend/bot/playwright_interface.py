@@ -144,19 +144,37 @@ class WebSession:
         Returns:
             Content in the requested format
         """
+        print(f"Getting content in format: {format}")
+        
         if format == ContentFormat.HTML:
-            return await self.page.content()
+            print("Retrieving HTML content...")
+            content = await self.page.content()
+            print(f"Retrieved {len(content)} characters of HTML")
+            return content
+            
         elif format == ContentFormat.TEXT:
-            return await self.page.text_content("body") or ""
+            print("Retrieving text content...")
+            content = await self.page.text_content("body") or ""
+            print(f"Retrieved {len(content)} characters of text")
+            return content
+            
         elif format == ContentFormat.DOM:
+            print("Retrieving DOM content...")
             html = await self.page.content()
-            return BeautifulSoup(html, 'html.parser')
+            dom = BeautifulSoup(html, 'html.parser')
+            print("Successfully parsed HTML into DOM")
+            return dom
+            
         elif format == ContentFormat.JSON:
+            print("Retrieving JSON content...")
             # Try to parse page content as JSON
             content = await self.page.text_content("body") or ""
             try:
-                return json.loads(content)
+                json_content = json.loads(content)
+                print("Successfully parsed JSON content")
+                return json_content
             except json.JSONDecodeError:
+                print("Failed to parse JSON content")
                 raise ValueError("Page content is not valid JSON")
     
     async def get_screenshot(self, 
@@ -322,6 +340,9 @@ class WebSession:
     # Utility Methods
     async def execute_script(self, script: str) -> Any:
         """Execute JavaScript on the page."""
+        # If the script starts with 'return', wrap it in a function
+        if script.strip().startswith('return'):
+            script = f"() => {{ {script} }}"
         return await self.page.evaluate(script)
     
     async def scroll_to(self, selector: str = None, x: int = 0, y: int = 0) -> "WebSession":
